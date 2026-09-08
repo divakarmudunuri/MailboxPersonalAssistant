@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+wheels/
+*.egg-info/
+.venv/
+
+# Node and build output
+node_modules/
+dist/
+
+# Secrets and OAuth material (python-backend); .env.example stays tracked
+python-backend/.env
+python-backend/credentials.json
+python-backend/token.json
+
+# Local state and data written by the app
+python-backend/.mail_check_state.json
+python-backend/*.db
+python-backend/logs/
+python-backend/long_term_memory.json
+python-backend/traces.jsonl
+python-backend/inbox_report.json
+
+# Editor and assistant files
+.idea/
+.vscode/
+.claude/
+CLAUDE.md
+.DS_Store

@@ -1,0 +1,67 @@
+flowchart LR
+    subgraph Google
+        IMAP[(Gmail over IMAP<br/>XOAUTH2, IDLE)]
+        CAL[(Google Calendar API)]
+    end
+
+    subgraph Models
+        OLLAMA[Ollama<br/>local models]
+        CLAUDE[Anthropic API]
+        OPENAI[OpenAI API]
+    end
+
+    subgraph "mail-assistant process (python-backend)"
+        direction TB
+        WATCHER[Mail watcher thread<br/>IMAP IDLE]
+        CRON[Report cron thread<br/>every REPORT_INTERVAL_SECONDS]
+        API[FastAPI<br/>/api/* and the built UI]
+        ROUTER[Email triage router<br/>LangGraph]
+        MANAGER[Inbox manager<br/>LangGraph]
+        REPORT[Inbox report<br/>LangGraph]
+        LLM[agents/llm<br/>provider switch]
+        TOOLS[agents/tools<br/>gmail + calendar tools]
+    end
+
+    subgraph "Files (python-backend)"
+        DB[(mail_assistant.db<br/>SQLite: emails)]
+        MEM[(long_term_memory.json<br/>learned rules + senders)]
+        TRACE[(traces.jsonl)]
+        RPT[(inbox_report.json)]
+        CUR[(.mail_check_state.json<br/>IMAP cursor)]
+        TOKEN[(token.json<br/>OAuth token)]
+    end
+
+    UI[React UI<br/>Home, Triage, Traces, Memory, Graph]
+
+    IMAP -->|new mail| WATCHER
+    WATCHER --> ROUTER
+    ROUTER -->|agentrespond / agentdraftonly| MANAGER
+    CRON --> REPORT
+    API -->|save from UI| ROUTER
+    API -->|Rebuild| REPORT
+    API -->|chat| LLM
+    ROUTER --> LLM
+    MANAGER --> LLM
+    REPORT --> LLM
+    MANAGER --> TOOLS
+    REPORT --> TOOLS
+    TOOLS --> IMAP
+    TOOLS --> CAL
+    ROUTER -->|reply check, label rules| IMAP
+    LLM --> OLLAMA
+    LLM --> CLAUDE
+    LLM --> OPENAI
+    ROUTER --> DB
+    ROUTER --> MEM
+    ROUTER --> TRACE
+    MANAGER --> DB
+    MANAGER --> TRACE
+    REPORT --> RPT
+    WATCHER --> CUR
+    IMAP -.-> TOKEN
+    CAL -.-> TOKEN
+    UI <-->|HTTP| API
+    API --> DB
+    API --> MEM
+    API --> TRACE
+    API --> RPT

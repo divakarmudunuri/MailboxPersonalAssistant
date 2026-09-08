@@ -1,0 +1,17 @@
+sequenceDiagram
+    autonumber
+    participant UI as Memory tab chat
+    participant API as FastAPI
+    participant C as Memory chat agent
+    participant Mem as Memory store
+    participant LLM as Model (LLM_PROVIDER)
+
+    UI->>API: POST /api/memory/chat {message}
+    API->>C: chat(message)
+    C->>Mem: base rules (code) + current learned rules
+    C->>LLM: rewrite the learned rules per the message (structured: rules, reply)
+    LLM-->>C: learned_preferences, reply
+    C->>Mem: update_preferences(learned_preferences)
+    C-->>API: reply, learned rules
+    API-->>UI: reply shown in the chat, learned rules refreshed
+    Note over Mem: The next email's recall step sees the new rule.

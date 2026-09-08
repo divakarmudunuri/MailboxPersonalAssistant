@@ -1,0 +1,24 @@
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	check_source(check_source)
+	pre_triage(pre_triage)
+	recall(recall)
+	triage(triage)
+	remember(remember)
+	save(save)
+	inbox_manager(inbox_manager)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> check_source;
+	check_source -.-> pre_triage;
+	check_source -.-> save;
+	pre_triage -.-> recall;
+	pre_triage -.-> save;
+	recall --> triage;
+	remember -.-> __end__;
+	remember -.-> inbox_manager;
+	save --> remember;
+	triage --> save;
+	inbox_manager --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

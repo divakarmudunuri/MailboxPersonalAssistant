@@ -1,0 +1,41 @@
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	recall(recall)
+	manage(manage)
+	manage__unknown_tool(manage__unknown_tool)
+	manage__repeat(manage__repeat)
+	manage__get_thread(manage__get_thread)
+	manage__search_threads(manage__search_threads)
+	manage__now(manage__now)
+	manage__invite_details(manage__invite_details)
+	manage__find_calendar_events(manage__find_calendar_events)
+	manage__create_reminder(manage__create_reminder)
+	manage__respond_to_invite(manage__respond_to_invite)
+	manage__save_draft(manage__save_draft)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> recall;
+	manage -.-> __end__;
+	manage -.-> manage__create_reminder;
+	manage -.-> manage__find_calendar_events;
+	manage -.-> manage__get_thread;
+	manage -.-> manage__invite_details;
+	manage -.-> manage__now;
+	manage -.-> manage__repeat;
+	manage -.-> manage__respond_to_invite;
+	manage -.-> manage__save_draft;
+	manage -.-> manage__search_threads;
+	manage -.-> manage__unknown_tool;
+	manage__create_reminder --> manage;
+	manage__find_calendar_events --> manage;
+	manage__get_thread --> manage;
+	manage__invite_details --> manage;
+	manage__now --> manage;
+	manage__repeat --> manage;
+	manage__respond_to_invite --> manage;
+	manage__save_draft --> manage;
+	manage__search_threads --> manage;
+	manage__unknown_tool --> manage;
+	recall --> manage;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

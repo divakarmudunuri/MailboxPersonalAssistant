@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    participant Trig as Report cron / Rebuild button
+    participant Rep as Inbox report agent
+    participant Mem as Memory store
+    participant DB as SQLite
+    participant LLM as Model (REPORT_LLM_PROVIDER)
+    participant Gmail as Gmail (IMAP)
+    participant F as inbox_report.json
+
+    Trig->>Rep: generate()
+    Rep->>Mem: base rules, learned rules, sender facts
+    Rep->>DB: triage decisions of the last 14 days
+    Rep->>Gmail: thread count, drafts count (recall)
+    loop up to MAX_ROUNDS
+        Rep->>LLM: skill + memory block, read-only tools bound
+        alt tool calls
+            LLM-->>Rep: now, search_threads, get_thread, list_drafts, unread_count
+            Rep->>Gmail: read
+        else wrote without opening a thread (once)
+            Rep-->>LLM: insist: open the actionable threads first
+        else prose
+            LLM-->>Rep: the briefing
+        end
+    end
+    opt answer is JSON or empty
+        Rep->>LLM: rewrite as prose, no tools
+    end
+    Rep->>F: generated_at, counts, rounds, tool_calls, briefing
+    Trig-->>Trig: Home tab reads GET /api/report

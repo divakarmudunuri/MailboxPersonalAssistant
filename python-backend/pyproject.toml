@@ -1,0 +1,42 @@
+[project]
+name = "mail-assistant"
+version = "0.1.0"
+description = "Gmail personal assistant: polls the inbox, triages mail with a local LLM, and serves a review UI"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.141.1",
+    "google-api-python-client>=2.200.0",
+    "google-auth>=2.57.1",
+    "google-auth-oauthlib>=1.4.1",
+    "imapclient>=3.1.0",
+    "langchain-anthropic>=1.7.1",
+    "langchain-ollama>=1.1.0",
+    "langchain-openai>=1.6.1",
+    "langgraph>=1.2.11",
+    "python-dotenv>=1.2.3",
+    "uvicorn[standard]>=0.52.4",
+]
+
+[project.scripts]
+mail-assistant = "mail_assistant:main"
+mail-assistant-auth = "mail_assistant.gmail_client.auth:main"
+
+[build-system]
+requires = ["uv_build>=0.12.2,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.6",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify, naming, comprehensions
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "N", "C4"]
+# N999: module files use dunder names by project convention
+ignore = ["N999"]

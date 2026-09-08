@@ -1,0 +1,21 @@
+sequenceDiagram
+    autonumber
+    participant UI as Triage tab
+    participant API as FastAPI
+    participant R as Triage router
+    participant DB as SQLite
+    participant Mem as Memory store
+    participant T as Trace file
+    participant M as Inbox manager
+
+    UI->>API: PATCH /api/emails/{id} {category, reason}
+    API->>DB: get email
+    API->>R: triage_new_email(message, source=user), rule manual
+    R->>R: check_source -> save (no pre_triage, no model)
+    R->>DB: save
+    R->>Mem: remember: the correction becomes the sender's preference
+    R->>T: check_source line
+    alt agentrespond or agentdraftonly
+        R->>M: handle(message)
+    end
+    API-->>UI: updated email

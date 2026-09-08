@@ -1,0 +1,26 @@
+sequenceDiagram
+    autonumber
+    participant U as You
+    participant App as uv run mail-assistant
+    participant Auth as gmail_client/auth.py
+    participant G as Google OAuth
+    participant W as Mail watcher
+    participant C as Report cron
+    participant API as FastAPI
+
+    U->>App: start
+    App->>W: thread
+    App->>C: thread
+    App->>API: uvicorn on API_PORT
+    W->>Auth: load_credentials()  (serialised by a lock)
+    alt token.json valid for all scopes
+        Auth-->>W: credentials
+    else missing or narrower scopes
+        Auth->>G: browser consent for mail + calendar.events
+        U->>G: approve
+        G-->>Auth: token, saved to token.json
+    end
+    W->>W: IMAP login (XOAUTH2), cursor from .mail_check_state.json or MAIL_BACKFILL_DAYS
+    C->>Auth: load_credentials() (cached)
+    C->>C: first briefing
+    Note over U: uv run mail-assistant-auth clears the token and runs the consent on its own.

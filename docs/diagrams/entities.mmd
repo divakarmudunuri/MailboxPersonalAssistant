@@ -1,0 +1,49 @@
+classDiagram
+    class EmailMessage {
+        id : str  (Gmail message id, hex)
+        thread_id : str  (Gmail thread id, hex)
+        subject : str
+        sender : str
+        received_at : datetime (UTC)
+        snippet : str
+        body_text : str
+        label_ids : list[str]
+        category : Category
+        reason : str
+        applied_rule : str
+        action : str
+    }
+    class Category {
+        <<enumeration>>
+        ignore
+        notify
+        agentrespond
+        user_reply_complete
+        agentdraftonly
+        pending
+    }
+    class SenderPreference {
+        sender : str (address, lowercased)
+        category : Category
+        reason : str
+        count : int
+    }
+    class LongTermMemory {
+        learned_preferences : str  (- name: rule, one per line)
+        senders : dict[str, SenderPreference]
+    }
+    class TraceEntry {
+        at : str (ISO, UTC)
+        step : str
+        email_id : str
+        sender : str
+        subject : str
+        category : str
+        rule : str
+        reason : str
+        duration_ms : int
+    }
+    EmailMessage --> Category
+    SenderPreference --> Category
+    LongTermMemory "1" *-- "many" SenderPreference
+    TraceEntry ..> EmailMessage : email_id

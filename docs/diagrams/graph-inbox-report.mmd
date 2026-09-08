@@ -1,0 +1,35 @@
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	recall(recall)
+	report(report)
+	insist(insist)
+	report__unknown_tool(report__unknown_tool)
+	report__repeat(report__repeat)
+	report__search_threads(report__search_threads)
+	report__get_thread(report__get_thread)
+	report__list_drafts(report__list_drafts)
+	report__unread_count(report__unread_count)
+	report__now(report__now)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> recall;
+	insist --> report;
+	recall --> report;
+	report -.-> __end__;
+	report -.-> insist;
+	report -.-> report__get_thread;
+	report -.-> report__list_drafts;
+	report -.-> report__now;
+	report -.-> report__repeat;
+	report -.-> report__search_threads;
+	report -.-> report__unknown_tool;
+	report -.-> report__unread_count;
+	report__get_thread --> report;
+	report__list_drafts --> report;
+	report__now --> report;
+	report__repeat --> report;
+	report__search_threads --> report;
+	report__unknown_tool --> report;
+	report__unread_count --> report;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc
