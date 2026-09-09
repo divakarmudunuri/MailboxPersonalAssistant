@@ -10,12 +10,14 @@ from mail_assistant.agents import __inbox_manager_agent__ as inbox_manager
 from mail_assistant.agents import __inbox_report_agent__ as inbox_report
 from mail_assistant.agents.__email_triage_router_agent__ import email_triage_router_agent, triage_new_email
 from mail_assistant.agents.__memory_chat_agent__ import chat
+from mail_assistant.agents.tools import __gmail_tools__ as gmail_tools
 from mail_assistant.config.__app_config__ import UI_DIST_DIR, configure_logging
 from mail_assistant.db import __email_store__ as email_store
 from mail_assistant.db import __memory_store__ as memory_store
+from mail_assistant.db import __pre_triage_ignore_store__ as ignore_list
 from mail_assistant.db import __trace_store__ as trace_store
 from mail_assistant.models.__email_message_model__ import Category, EmailMessage
-from mail_assistant.models.__sender_preference_model__ import SenderPreference
+from mail_assistant.models.__pre_triage_ignore_model__ import IgnoreEntry, IgnoreReason
 from mail_assistant.models.__trace_model__ import TraceEntry
 
 configure_logging()
@@ -27,6 +29,24 @@ class CategoryUpdate(BaseModel):
 
     category: Category
     reason: str = ""
+
+
+class Draft(BaseModel):
+    """A reply the inbox manager drafted, for the person to edit and send."""
+
+    to: str
+    subject: str
+    body: str
+    draft_message_id: str  # the copy saved in Gmail's Drafts folder, discarded when the reply is sent
+
+
+class SendReply(BaseModel):
+    """Body of the send endpoint: the (edited) draft."""
+
+    to: str
+    subject: str
+    body: str
+    draft_message_id: str = ""
 
 
 class EmailPage(BaseModel):
@@ -45,11 +65,10 @@ class BaseRule(BaseModel):
 
 
 class MemoryView(BaseModel):
-    """Long-term memory as the UI shows it: named base rules from code, learned rules, and per-sender facts."""
+    """Long-term memory as the UI shows it: named base rules from code and the learned rules."""
 
     base_rules: list[BaseRule]
     learned_preferences: str
-    senders: list[SenderPreference]
 
 
 class HomeList(BaseModel):
@@ -62,7 +81,7 @@ class HomeList(BaseModel):
 class HomeView(BaseModel):
     """What the Home tab shows beside the briefing."""
 
-    waiting: HomeList  # notify, agentdraftonly, and pending mail: triage items waiting on the person
+    waiting: HomeList  # notify, auto_draft, and pending mail: triage items waiting on the person
     actions: HomeList  # mail the inbox manager acted on, with the action on each email
 
 
@@ -73,6 +92,13 @@ class TracePage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class IgnoreSender(BaseModel):
+    """Body for adding one sender to the pre-triage ignore list."""
+
+    sender: str
+    ignore_reason_label: IgnoreReason
 
 
 class ChatMessage(BaseModel):
@@ -124,30 +150,77 @@ def get_email(email_id: str) -> EmailMessage:
     return message
 
 
-@app.patch("/api/emails/{email_id}")
-def update_email(email_id: str, update: CategoryUpdate) -> EmailMessage:
-    """Apply the user's category and reason, then run the graph as a user decision: saved, remembered, routed."""
+def _stored(email_id: str) -> EmailMessage:
     message = email_store.get(email_id)
     if message is None:
         raise HTTPException(404, "email not found")
+    return message
+
+
+@app.patch("/api/emails/{email_id}")
+def update_email(email_id: str, update: CategoryUpdate) -> EmailMessage:
+    """Apply the user's category and reason, then run the graph as a user decision: saved, remembered, routed."""
+    message = _stored(email_id)
     message.category, message.reason, message.applied_rule = update.category, update.reason, "manual"
+    return triage_new_email(message, source="user")
+
+
+@app.post("/api/emails/{email_id}/read")
+def mark_read(email_id: str) -> EmailMessage:
+    """Mark the email read in Gmail and drop its UNREAD label here."""
+    message = _stored(email_id)
+    if not gmail_tools._mailbox().mark_read(message.id):
+        raise HTTPException(404, "email no longer in the mailbox")
+    message.label_ids = [lbl for lbl in message.label_ids if lbl != "UNREAD"]
+    email_store.save(message)
+    return message
+
+
+@app.get("/api/emails/{email_id}/draft")
+def stored_draft(email_id: str) -> Draft:
+    """The draft already in Gmail's Drafts on this email's thread, written by the manager or by hand (404 if none)."""
+    draft = gmail_tools._mailbox().draft_on_thread(_stored(email_id).thread_id)
+    if draft is None:
+        raise HTTPException(404, "no draft on this thread")
+    return Draft(**draft)
+
+
+@app.post("/api/emails/{email_id}/draft")
+def draft_reply(email_id: str) -> Draft:
+    """Have the inbox manager draft a reply now (saved in Gmail's Drafts) and return it for editing."""
+    message = _stored(email_id)
+    draft = inbox_manager.draft_reply(message)
+    if draft is None:
+        raise HTTPException(502, f"the inbox manager wrote no draft: {message.action}")
+    return Draft(**draft)
+
+
+@app.post("/api/emails/{email_id}/send")
+def send_reply(email_id: str, reply: SendReply) -> EmailMessage:
+    """Send the edited draft as a reply on the thread, discard the Gmail draft, and file the email as replied."""
+    message = _stored(email_id)
+    mailbox = gmail_tools._mailbox()
+    mailbox.send_reply(message.id, reply.to, reply.subject, reply.body)
+    on_thread = mailbox.draft_on_thread(message.thread_id) or {}
+    for draft_id in {reply.draft_message_id, on_thread.get("draft_message_id", "")} - {""}:
+        mailbox.discard_draft(draft_id)
+    message.category, message.applied_rule = Category.USER_REPLY_COMPLETE, "manual"
+    message.reason, message.action = "Replied from the Inbox tab", f"reply sent to {reply.to}"
     return triage_new_email(message, source="user")
 
 
 @app.get("/api/memory")
 def get_memory() -> MemoryView:
     """Everything in long-term memory, for the Memory tab."""
-    memory = memory_store.load()
-    senders = sorted(memory.senders.values(), key=lambda p: p.sender)
     base_rules = [BaseRule(name=n, text=t, outcome=o) for n, t, o in memory_store.LONG_TERM_MEMORY]
-    return MemoryView(base_rules=base_rules, learned_preferences=memory.learned_preferences, senders=senders)
+    return MemoryView(base_rules=base_rules, learned_preferences=memory_store.load().learned_preferences)
 
 
 @app.post("/api/memory/chat")
 def memory_chat(body: ChatMessage) -> ChatReply:
     """Apply a chat message to the learned preferences through the model and return its reply."""
     edit = chat(body.message.strip())
-    return ChatReply(reply=edit.reply, learned_preferences=edit.learned_preferences)
+    return ChatReply(reply=edit.reply, learned_preferences=memory_store.load().learned_preferences)
 
 
 @app.get("/api/report")
@@ -160,7 +233,7 @@ def get_report() -> dict:
 async def refresh_report() -> dict:
     """Read the inbox and write a fresh briefing. Costs several model calls; runs off the event loop."""
     try:
-        return await asyncio.to_thread(inbox_report.generate)
+        return await asyncio.to_thread(inbox_report.generate, True)  # force: the person asked for a rebuild
     except Exception as exc:
         raise HTTPException(502, f"Could not build the briefing: {exc}") from exc
 
@@ -176,10 +249,30 @@ def get_home() -> HomeView:
     )
 
 
+@app.get("/api/ignore-list")
+def get_ignore_list() -> list[IgnoreEntry]:
+    """The pre-triage ignore list: senders grouped by reason."""
+    return ignore_list.load()
+
+
+@app.post("/api/ignore-list")
+def add_ignored_sender(body: IgnoreSender) -> list[IgnoreEntry]:
+    """Add one sender under a reason; a sender already listed moves to that reason."""
+    return ignore_list.add(body.sender.strip(), body.ignore_reason_label)
+
+
+@app.delete("/api/ignore-list/{sender}")
+def remove_ignored_sender(sender: str) -> list[IgnoreEntry]:
+    """Take one sender off the list."""
+    return ignore_list.remove(sender)
+
+
 @app.get("/api/traces")
-def list_traces(q: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)) -> TracePage:
-    """Paginated trace log of every pre_triage and triage step, newest first, with an optional text search."""
-    items, total = trace_store.list_traces(q.strip(), page, page_size)
+def list_traces(
+    q: str = "", step: str = "", page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100)
+) -> TracePage:
+    """Paginated trace log, newest first, optionally limited to one step and filtered by a text search."""
+    items, total = trace_store.list_traces(q.strip(), page, page_size, step.strip())
     return TracePage(items=items, total=total, page=page, page_size=page_size)
 
 
@@ -208,7 +301,7 @@ def get_graphs() -> list[GraphShape]:
         ),
         _shape(
             "Inbox manager",
-            "Runs from the router's inbox_manager node for agentrespond and agentdraftonly mail.",
+            "Runs from the router's inbox_manager node for auto_schedule and auto_draft mail.",
             inbox_manager.inbox_manager_agent(),
             inbox_manager.ALL_TOOLS,
         ),
@@ -216,7 +309,7 @@ def get_graphs() -> list[GraphShape]:
             "Inbox report",
             "Runs at startup, every REPORT_INTERVAL_SECONDS, and on Rebuild from the Home tab.",
             inbox_report.inbox_report_agent(),
-            inbox_report.TOOLS_BY_NAME,
+            {},
         ),
     ]
 

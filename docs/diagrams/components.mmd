@@ -12,7 +12,8 @@ flowchart LR
 
     subgraph "mail-assistant process (python-backend)"
         direction TB
-        WATCHER[Mail watcher thread<br/>IMAP IDLE]
+        WATCHER[Mail watcher thread<br/>IMAP IDLE, stores new mail]
+        TCRON[Triage cron thread<br/>every TRIAGE_INTERVAL_SECONDS]
         CRON[Report cron thread<br/>every REPORT_INTERVAL_SECONDS]
         API[FastAPI<br/>/api/* and the built UI]
         ROUTER[Email triage router<br/>LangGraph]
@@ -24,20 +25,23 @@ flowchart LR
 
     subgraph "Files (python-backend)"
         DB[(mail_assistant.db<br/>SQLite: emails)]
-        MEM[(long_term_memory.json<br/>learned rules + senders)]
+        MEM[(long_term_memory.json<br/>learned rules)]
+        IGN[(pre_triage_ignore_list.json)]
         TRACE[(traces.jsonl)]
         RPT[(inbox_report.json)]
-        CUR[(.mail_check_state.json<br/>IMAP cursor)]
+        CUR[(mail_check_state.json<br/>IMAP cursor)]
         TOKEN[(token.json<br/>OAuth token)]
     end
 
-    UI[React UI<br/>Home, Triage, Traces, Memory, Graph]
+    UI[React UI<br/>Home, Inbox, Traces, Memory, Graph]
 
     IMAP -->|new mail| WATCHER
-    WATCHER --> ROUTER
-    ROUTER -->|agentrespond / agentdraftonly| MANAGER
+    WATCHER -->|pending rows| DB
+    TCRON -->|untriaged rows| ROUTER
+    ROUTER -->|auto_schedule / auto_draft| MANAGER
     CRON --> REPORT
     API -->|save from UI| ROUTER
+    API -->|send reply| IMAP
     API -->|Rebuild| REPORT
     API -->|chat| LLM
     ROUTER --> LLM
@@ -52,7 +56,8 @@ flowchart LR
     LLM --> CLAUDE
     LLM --> OPENAI
     ROUTER --> DB
-    ROUTER --> MEM
+    MEM --> ROUTER
+    ROUTER <--> IGN
     ROUTER --> TRACE
     MANAGER --> DB
     MANAGER --> TRACE
@@ -63,5 +68,6 @@ flowchart LR
     UI <-->|HTTP| API
     API --> DB
     API --> MEM
+    API --> IGN
     API --> TRACE
     API --> RPT

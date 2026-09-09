@@ -7,8 +7,8 @@ What you end up with:
 
 | File | Where | What it is |
 | --- | --- | --- |
-| `credentials.json` | `python-backend/` | The OAuth client secret you download from Google Cloud. Identifies the app. |
-| `token.json` | `python-backend/` | Your consent, saved by the app. Grants the app access to your mailbox and calendar. |
+| `credentials.json` | `python-backend/.secrets/` | The OAuth client secret you download from Google Cloud. Identifies the app. |
+| `token.json` | `python-backend/.secrets/` | Your consent, saved by the app. Grants the app access to your mailbox and calendar. |
 
 Both are gitignored. Never commit or share them.
 
@@ -48,8 +48,8 @@ API enabled, so the Gmail API can stay off.
 
 1. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**.
 2. Application type: **Desktop app**. Give it a name and click **Create**.
-3. Download the JSON and save it as `python-backend/credentials.json`, or set `GMAIL_CREDENTIALS_FILE` in `.env` to
-   wherever you put it.
+3. Download the JSON and save it as `python-backend/.secrets/credentials.json` (the folder is created on first run and
+   is gitignored).
 
 ## 5. Enable IMAP in Gmail
 
@@ -106,7 +106,8 @@ token was granted for narrower scopes than it needs.
 - Over IMAP it detects new mail with IDLE, reads messages and threads, checks the Sent folder for your replies, and,
   through the inbox manager, can save drafts, set flags and labels, archive, and move messages to Trash or Spam.
 - Through the Calendar API it lists events, creates reminders, and sets your RSVP on invitations.
-- It never sends mail, and permanent deletion is only possible for messages already in Trash.
+- It sends mail only when you click Send on a drafted reply in the Inbox tab, over SMTP with the same token; the
+  agents themselves never send. Permanent deletion is only possible for messages already in Trash.
 
 Revoke access at any time from your Google account's
 [third-party apps and services](https://myaccount.google.com/connections) page, or delete `token.json` to make the app

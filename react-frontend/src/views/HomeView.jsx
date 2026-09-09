@@ -1,13 +1,23 @@
 import { useEffect, useState } from "react";
 import Prose from "../components/Prose.jsx";
 
-const MAIL_DAYS = 14;
+const MAIL_DAYS = 30;
 const REFRESH_MS = 30000;
 
 // "Sam Lee <sam@example.com>" -> "Sam Lee"
 function sender(from) {
   const match = from.match(/^\s*"?([^"<]+?)"?\s*</);
   return (match ? match[1] : from).trim();
+}
+
+// "save_draft: draft saved, Message-ID <...>; create_reminder: ..." -> what a person would say happened.
+const ACTIONS = [["save_draft", "Draft reply saved"], ["create_reminder", "Reminder created"], ["respond_to_invite", "Invitation answered"]];
+function describe(action) {
+  const parts = String(action || "").split("; ").map((part) => {
+    const hit = ACTIONS.find(([tool]) => part.startsWith(tool));
+    return hit ? hit[1] : part.replace(/^no action:\s*/i, "No action: ");
+  });
+  return [...new Set(parts)].join(", ");
 }
 
 function age(iso) {
@@ -18,7 +28,7 @@ function age(iso) {
   return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-// The start-of-day briefing: the last one is cached on the server; Build reads the inbox again.
+// The Quick Overview: the last one is cached on the server; Build reads the inbox again.
 export default function HomeView() {
   const [data, setData] = useState(null);
   const [home, setHome] = useState(null);
@@ -46,7 +56,7 @@ export default function HomeView() {
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `API returned ${r.status}`);
       setData(await r.json());
     } catch (e) {
-      setError(`Could not build the briefing: ${e.message}`);
+      setError(`Could not build the overview: ${e.message}`);
     } finally {
       setBusy(false);
     }
@@ -60,21 +70,21 @@ export default function HomeView() {
     <section className="detail">
       <div className="brief-head">
         <div>
-          <h2>Inbox briefing</h2>
+          <h2>Quick Overview</h2>
           <p className="meta">
             {data?.generated_at
-              ? `Built ${age(data.generated_at)} from ${counts.threads ?? 0} threads` + (data.rounds ? ` · ${data.rounds} rounds of reading` : "")
-              : `A start-of-day briefing over the last ${MAIL_DAYS} days of mail.`}
+              ? `Built ${age(data.generated_at)} from ${counts.candidates ?? 0} threads, one model call`
+              : `Unread and needs-review counts, what is waiting on you, deadlines, and the first thing to do, over the last ${MAIL_DAYS} days of mail.`}
           </p>
         </div>
         <button className="primary" onClick={build} disabled={busy}>
-          {busy ? "Reading…" : briefing ? "Rebuild" : "Build briefing"}
+          {busy ? "Reading…" : briefing ? "Rebuild" : "Build overview"}
         </button>
       </div>
 
       {error && <div className="error">{error}</div>}
       {!briefing && !busy && !error && (
-        <p className="empty">No briefing yet. Building one reads your mail and costs a few model calls. It has no tool that could send or change anything.</p>
+        <p className="empty">No overview yet. Building one reads your stored mail, the Sent folder, and the calendar, and costs one model call. Nothing on this path can send or change anything.</p>
       )}
       {busy && !briefing && <p className="empty">Reading your inbox…</p>}
 
@@ -82,9 +92,10 @@ export default function HomeView() {
         <>
           <Prose text={briefing} />
           <div className="stats">
-            <span><strong>{counts.threads ?? 0}</strong> threads, last {MAIL_DAYS} days</span>
-            <span><strong>{counts.drafts ?? 0}</strong> replies already drafted</span>
-            <span><strong>{data.tool_calls ?? 0}</strong> tool calls</span>
+            <span><strong>{counts.unread ?? 0}</strong> unread</span>
+            <span><strong>{counts.needs_review ?? 0}</strong> need review, last {MAIL_DAYS} days</span>
+            <span><strong>{counts.events_today ?? 0}</strong> events today and tomorrow</span>
+            <span><strong>{counts.pending_invites ?? 0}</strong> invitations unanswered</span>
           </div>
         </>
       )}
@@ -92,23 +103,19 @@ export default function HomeView() {
 
     <div className="home-side">
       <section className="detail panel">
-        <h3>Waiting on you</h3>
-        <p className="big">{home ? home.waiting.total : "…"}</p>
-        <p className="meta">Triage items waiting on you: to read, drafts to review, and mail triage could not decide.</p>
-        <ul className="prose-list compact">
-          {home?.waiting.items.slice(0, 6).map((e) => (
-            <li key={e.id}><span className={`chip chip-${e.category}`}>{e.category}</span> {sender(e.sender)}: {e.subject || "(no subject)"}</li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="detail panel">
         <h3>Actions taken by the agent</h3>
         <p className="big">{home ? home.actions.total : "…"}</p>
         <p className="meta">Reminders created, invitations answered, drafts saved.</p>
         <ul className="prose-list compact">
           {home?.actions.items.slice(0, 6).map((e) => (
-            <li key={e.id}><strong>{sender(e.sender)}</strong>, {e.subject || "(no subject)"}<br /><span className="muted">{e.action}</span></li>
+            <li key={e.id}>
+              <strong>{sender(e.sender)}</strong>, {e.subject || "(no subject)"}<br />
+              <span className="muted">{describe(e.action)}</span>
+              {" · "}
+              {e.action.startsWith("save_draft")
+                ? <a className="prose-link" href={`#inbox/${e.id}/reply`}>Review draft and send</a>
+                : <a className="prose-link" href={`#inbox/${e.id}`}>Open in Inbox</a>}
+            </li>
           ))}
         </ul>
       </section>

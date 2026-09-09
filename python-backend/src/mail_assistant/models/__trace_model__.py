@@ -3,10 +3,10 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class TraceEntry:
-    """One step of the triage graph applied to one email, as written to the trace file."""
+    """One graph step as written to the trace file; the email fields are empty for the briefing and the memory chat."""
 
     at: str  # ISO timestamp, UTC
-    step: str  # pre_triage | triage
+    step: str  # manual_user_input | pre_triage | triage | inbox_manager | inbox_report | memory_chat
     email_id: str
     sender: str
     subject: str

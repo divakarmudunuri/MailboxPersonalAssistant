@@ -5,11 +5,13 @@ sequenceDiagram
     participant Auth as gmail_client/auth.py
     participant G as Google OAuth
     participant W as Mail watcher
+    participant TC as Triage cron
     participant C as Report cron
     participant API as FastAPI
 
     U->>App: start
     App->>W: thread
+    App->>TC: thread
     App->>C: thread
     App->>API: uvicorn on API_PORT
     W->>Auth: load_credentials()  (serialised by a lock)
@@ -20,7 +22,8 @@ sequenceDiagram
         U->>G: approve
         G-->>Auth: token, saved to token.json
     end
-    W->>W: IMAP login (XOAUTH2), cursor from .mail_check_state.json or MAIL_BACKFILL_DAYS
+    W->>W: IMAP login (XOAUTH2), cursor from data/mail_check_state.json or MAIL_BACKFILL_DAYS
+    TC->>TC: every TRIAGE_INTERVAL_SECONDS, triage stored pending mail
     C->>Auth: load_credentials() (cached)
-    C->>C: first briefing
+    C->>C: first overview (skipped when nothing changed)
     Note over U: uv run mail-assistant-auth clears the token and runs the consent on its own.

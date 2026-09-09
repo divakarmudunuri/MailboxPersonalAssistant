@@ -25,10 +25,18 @@ def _dump(value) -> str:
 
 
 @tool
-def search_threads(query: str = "in:inbox newer_than:14d", limit: int = 10) -> str:
+def search_threads(query: str = "in:inbox newer_than:30d", limit: int = 10, unanswered: bool = False) -> str:
     """Search mail with a Gmail query (anything the Gmail search box accepts). Returns one row per thread: the latest
-    message's headers, the message count, and whether any message is unread. No bodies."""
-    return _dump(_mailbox().search_threads(query, limit))
+    message's headers, the message count, and whether any message is unread. No bodies. With unanswered=true, threads
+    the person has replied in are left out."""
+    return _dump(_mailbox().search_threads(query, limit, unanswered))
+
+
+@tool
+def count_threads(query: str, unanswered: bool = False) -> str:
+    """How many threads match a Gmail query, without fetching them (exact up to 1000). With unanswered=true, threads
+    the person has replied in are left out."""
+    return str(_mailbox().count_threads(query, unanswered=unanswered))
 
 
 @tool
@@ -163,6 +171,7 @@ def save_draft(to: str, subject: str, body: str, thread_id: str = "") -> str:
 
 READ_TOOLS = [
     search_threads,
+    count_threads,
     search_messages,
     get_thread,
     preview_message,

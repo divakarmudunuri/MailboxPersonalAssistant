@@ -14,10 +14,15 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS emails (
     action TEXT DEFAULT '')"""
 
 
+RENAMED = {"agentrespond": "auto_schedule", "agentdraftonly": "auto_draft"}  # older files carry the old names
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
     conn.execute(SCHEMA)
+    for old, new in RENAMED.items():
+        conn.execute("UPDATE emails SET category = ? WHERE category = ?", (new, old))
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(emails)")}
     for column in ("applied_rule", "action"):  # databases created before these columns existed
         if column not in columns:
@@ -70,7 +75,18 @@ def recent(days: int, limit: int = 100) -> list[EmailMessage]:
     return [_to_message(r) for r in rows]
 
 
-WAITING = (Category.NOTIFY, Category.AGENT_DRAFT_ONLY, Category.PENDING)  # triage items still waiting on the person
+def untriaged(limit: int = 50) -> list[EmailMessage]:
+    """Emails the watcher stored that triage has not seen yet (`pending` with no reason), oldest first. A `pending`
+    row with a "triage failed" reason has been seen and is not retried here."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM emails WHERE category = ? AND reason = '' ORDER BY received_at ASC LIMIT ?",
+            (Category.PENDING.value, limit),
+        ).fetchall()
+    return [_to_message(r) for r in rows]
+
+
+WAITING = (Category.NOTIFY, Category.AUTO_DRAFT, Category.PENDING)  # triage items still waiting on the person
 
 
 def waiting_on_user(limit: int = 20) -> tuple[list[EmailMessage], int]:

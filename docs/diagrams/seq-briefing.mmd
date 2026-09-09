@@ -2,29 +2,25 @@ sequenceDiagram
     autonumber
     participant Trig as Report cron / Rebuild button
     participant Rep as Inbox report agent
-    participant Mem as Memory store
     participant DB as SQLite
-    participant LLM as Model (REPORT_LLM_PROVIDER)
     participant Gmail as Gmail (IMAP)
+    participant Cal as Google Calendar
+    participant Mem as Memory store
+    participant LLM as Model (REPORT_LLM)
     participant F as inbox_report.json
 
-    Trig->>Rep: generate()
-    Rep->>Mem: base rules, learned rules, sender facts
-    Rep->>DB: triage decisions of the last 14 days
-    Rep->>Gmail: thread count, drafts count (recall)
-    loop up to MAX_ROUNDS
-        Rep->>LLM: skill + memory block, read-only tools bound
-        alt tool calls
-            LLM-->>Rep: now, search_threads, get_thread, list_drafts, unread_count
-            Rep->>Gmail: read
-        else wrote without opening a thread (once)
-            Rep-->>LLM: insist: open the actionable threads first
-        else prose
-            LLM-->>Rep: the briefing
-        end
+    Trig->>Rep: generate(force)
+    Rep->>DB: stored mail of the last 30 days (gather)
+    Rep->>Gmail: unread count, Sent folder threads
+    Rep->>Cal: events for 14 days with your response
+    Rep->>Rep: snapshot: counts, needs review, stale, today, invites, money, candidate bodies, previous ids
+    alt fingerprint unchanged and not forced
+        Rep->>F: keep the cached overview
+    else changed or forced
+        Rep->>Mem: base rules, learned rules
+        Rep->>LLM: skill + memory (system), snapshot (user), structured Overview, retried once
+        LLM-->>Rep: calendar notes, waiting on you / them, deadlines, money, first thing
+        Rep->>Rep: render markdown, link items to #inbox/id, mark new ones
+        Rep->>F: generated_at, counts, fingerprint, item_ids, briefing
     end
-    opt answer is JSON or empty
-        Rep->>LLM: rewrite as prose, no tools
-    end
-    Rep->>F: generated_at, counts, rounds, tool_calls, briefing
     Trig-->>Trig: Home tab reads GET /api/report

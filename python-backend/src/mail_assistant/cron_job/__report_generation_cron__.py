@@ -1,4 +1,5 @@
-"""Builds the inbox briefing on a schedule: once at start, then every REPORT_INTERVAL_SECONDS."""
+"""Builds the Quick Overview on a schedule: once at start, then every REPORT_INTERVAL_SECONDS (skipped when nothing
+changed since the last build)."""
 
 import logging
 import time
@@ -10,12 +11,12 @@ log = logging.getLogger(__name__)
 
 
 class ReportGenerator:
-    """Writes a fresh briefing to REPORT_FILE on an interval; the Home tab reads that file."""
+    """Writes a fresh overview to REPORT_FILE on an interval; the Home tab reads that file."""
 
     def run_once(self) -> None:
-        """Build one briefing and save it."""
+        """Build one overview and save it."""
         report = inbox_report.generate()
-        log.info("Inbox briefing built: %d rounds, %d tool calls", report["rounds"], report["tool_calls"])
+        log.info("Quick Overview ready: %s", report["counts"])
 
     def run_forever(self) -> None:
         """Build now, then every REPORT_INTERVAL_SECONDS; log and keep going on errors."""
@@ -23,7 +24,7 @@ class ReportGenerator:
             try:
                 self.run_once()
             except Exception:
-                log.exception("Inbox briefing failed")
+                log.exception("Quick Overview failed")
             time.sleep(REPORT_INTERVAL_SECONDS)
 
 

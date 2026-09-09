@@ -1,4 +1,4 @@
-"""Provider-switchable chat models: LLM_PROVIDER picks the triage model; agents may ask for another one."""
+"""Provider-switchable chat models: every agent picks its own (provider, model) pair from the config."""
 
 from functools import cache
 
@@ -8,13 +8,10 @@ from pydantic import BaseModel
 
 from mail_assistant.config.__app_config__ import (
     ANTHROPIC_API_KEY,
-    ANTHROPIC_MODEL,
-    LLM_PROVIDER,
     OLLAMA_BASE_URL,
-    OLLAMA_MODEL,
     OLLAMA_NUM_CTX,
     OPENAI_API_KEY,
-    OPENAI_MODEL,
+    TRIAGE_LLM,
 )
 
 
@@ -45,24 +42,31 @@ def _openai(model: str) -> BaseChatModel:
 
 
 _PROVIDERS = {"ollama": _ollama, "anthropic": _anthropic, "openai": _openai}
-_DEFAULT_MODELS = {"ollama": OLLAMA_MODEL, "anthropic": ANTHROPIC_MODEL, "openai": OPENAI_MODEL}
 
 
 @cache
-def chat_model(provider: str = LLM_PROVIDER, model: str | None = None) -> BaseChatModel:
-    """The chat model for a provider (LLM_PROVIDER by default) and model name (that provider's default), built once."""
+def chat_model(provider: str, model: str) -> BaseChatModel:
+    """The chat model for a provider and model name, built once per pair."""
     try:
-        return _PROVIDERS[provider](model or _DEFAULT_MODELS[provider])
+        return _PROVIDERS[provider](model)
     except KeyError:
         raise ValueError(f"LLM provider must be one of {sorted(_PROVIDERS)}, not {provider!r}") from None
 
 
 @cache
-def structured_model(schema: type[BaseModel]) -> Runnable:
-    """The chat model constrained to return an instance of `schema`, built once per schema."""
-    return chat_model().with_structured_output(schema)
+def structured_model(schema: type[BaseModel], provider: str, model: str) -> Runnable:
+    """The chat model constrained to return an instance of `schema`, built once per schema and model."""
+    return chat_model(provider, model).with_structured_output(schema)
 
 
-def ask(schema: type[BaseModel], system_prompt: str, user_text: str) -> BaseModel:
-    """Send one system + user turn and return the model's answer parsed as `schema`."""
-    return structured_model(schema).invoke([("system", system_prompt), ("user", user_text)])
+def ask(
+    schema: type[BaseModel],
+    system_prompt: str,
+    user_text: str,
+    run_name: str = "ask",
+    llm: tuple[str, str] = TRIAGE_LLM,
+) -> BaseModel:
+    """Send one system + user turn and return the model's answer parsed as `schema`; `run_name` labels the trace,
+    `llm` is the agent's (provider, model) pair."""
+    messages = [("system", system_prompt), ("user", user_text)]
+    return structured_model(schema, *llm).invoke(messages, config={"run_name": run_name})

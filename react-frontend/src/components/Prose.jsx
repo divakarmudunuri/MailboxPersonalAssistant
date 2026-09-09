@@ -2,16 +2,24 @@
 // elements rather than injected as HTML: no innerHTML anywhere on this path.
 
 function inline(text, keyPrefix) {
-  // **bold**, *italic*, and `code`; everything else literal.
+  // **bold**, *italic*, `code`, and [text](href) links to an in-app hash or https; everything else literal.
   const parts = [];
-  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  const pattern = /(\[[^\]]+\]\((?:#|https:\/\/)[^)\s]+\)|\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
   let last = 0;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     if (match.index > last) parts.push(text.slice(last, match.index));
     const token = match[0];
     const key = `${keyPrefix}-${match.index}`;
-    if (token.startsWith("**")) parts.push(<strong key={key}>{token.slice(2, -2)}</strong>);
+    if (token.startsWith("[")) {
+      const link = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      const external = link[2].startsWith("https://"); // in-app #inbox links stay in this tab
+      parts.push(
+        <a key={key} href={link[2]} className="prose-link" target={external ? "_blank" : undefined} rel={external ? "noopener noreferrer" : undefined}>
+          {link[1]}
+        </a>
+      );
+    } else if (token.startsWith("**")) parts.push(<strong key={key}>{token.slice(2, -2)}</strong>);
     else if (token.startsWith("`")) parts.push(<code key={key}>{token.slice(1, -1)}</code>);
     else parts.push(<em key={key}>{token.slice(1, -1)}</em>);
     last = match.index + token.length;

@@ -17,20 +17,13 @@ classDiagram
         <<enumeration>>
         ignore
         notify
-        agentrespond
+        auto_schedule
         user_reply_complete
-        agentdraftonly
+        auto_draft
         pending
-    }
-    class SenderPreference {
-        sender : str (address, lowercased)
-        category : Category
-        reason : str
-        count : int
     }
     class LongTermMemory {
         learned_preferences : str  (- name: rule, one per line)
-        senders : dict[str, SenderPreference]
     }
     class TraceEntry {
         at : str (ISO, UTC)
@@ -44,6 +37,4 @@ classDiagram
         duration_ms : int
     }
     EmailMessage --> Category
-    SenderPreference --> Category
-    LongTermMemory "1" *-- "many" SenderPreference
     TraceEntry ..> EmailMessage : email_id

@@ -4,7 +4,7 @@ START -> check_source -> (saved by the user in the UI) -> save
                          (new mail from the watcher)  -> pre_triage
 pre_triage -> (already replied, or ignored by a Gmail label) -> save
               (otherwise)                                     -> recall -> triage -> save
-save -> remember -> (agentrespond | agentdraftonly) -> inbox_manager -> END
+save -> remember -> (auto_schedule | auto_draft) -> inbox_manager -> END
                     (anything else)                 -> END
 
 `recall` loads the preferences (base rules from code plus learned ones from the memory file) and what is remembered
@@ -27,10 +27,10 @@ from mail_assistant.agents.llm.__structured_llm__ import ask
 from mail_assistant.config.__app_config__ import PRE_TRIAGE_IGNORE_LABELS
 from mail_assistant.db import __email_store__ as email_store
 from mail_assistant.db import __memory_store__ as memory_store
+from mail_assistant.db import __pre_triage_ignore_store__ as ignore_list
 from mail_assistant.db import __trace_store__ as trace_store
 from mail_assistant.gmail_client import GmailImapClient
 from mail_assistant.models.__email_message_model__ import Category, EmailMessage
-from mail_assistant.models.__sender_preference_model__ import SenderPreference
 
 log = logging.getLogger(__name__)
 
@@ -49,11 +49,13 @@ Classify the email as exactly one of:
 - ignore: a base or learned rule says it is not worth responding to or knowing about.
 - notify: the default for everything else. The person should know about it and the assistant will not reply.
   Also use notify when you cannot tell which category applies; then set `rule` to `none`.
-- agentrespond or agentdraftonly: only when a learned rule says the assistant should reply to this sender or
-  this kind of email. Never choose either without such a rule, even if the email asks a question. Choose
-  agentrespond when the assistant can safely send the reply alone: acknowledgements, confirmations, and simple
-  factual answers that commit the person to nothing. Choose agentdraftonly when the person must review it first.
-Guardrail: once a learned rule has called for a reply, choose agentdraftonly rather than agentrespond if the email
+- auto_schedule or auto_draft: only when a learned rule says the assistant should act on this sender or this
+  kind of email. Never choose either without such a rule, even if the email asks a question. When several learned
+  rules cover the same sender, apply the one whose kind of mail matches this email (a rule about calendar
+  invitations beats a rule about that sender's mail in general). Choose auto_schedule
+  when the action is on the calendar: a reminder to create or a meeting invitation to answer. Choose auto_draft
+  when a written reply is wanted; the assistant drafts it and the person reviews it before anything is sent.
+Guardrail: once a learned rule has called for an action, choose auto_draft rather than auto_schedule if the email
 mentions money, prices, contracts, leases, offers, deadlines with consequences, or asks the person to decide,
 agree, or negotiate anything, or whenever you are unsure. If no learned rule calls for a reply, the answer is
 ignore or notify, nothing else. A learned rule that names an email address or domain applies only to senders at
@@ -69,7 +71,7 @@ No other words."""
 class TriageDecision(BaseModel):
     """Structured output the model must return."""
 
-    category: Literal["ignore", "notify", "agentrespond", "agentdraftonly"]
+    category: Literal["ignore", "notify", "auto_schedule", "auto_draft"]
     reason: str
     rule: str  # name of the rule applied, or "none"
 
@@ -98,7 +100,6 @@ class State(TypedDict, total=False):
     source: Literal["cron", "user"]  # "user" when the category was set by hand in the UI
     preferences: str  # base rules + learned preferences, for the system prompt
     learned_rules: dict[str, str]  # learned rules by name; only these can unlock a reply
-    sender_memory: SenderPreference | None
 
 
 @cache
@@ -108,11 +109,12 @@ def _gmail() -> GmailImapClient:
 
 
 def check_source(state: State) -> State:
-    """Note when the decision was made by the user; such messages are stored as-is without triage."""
+    """Note when the decision was made by the user (trace step `manual_user_input`); such messages are stored as-is
+    without triage."""
     if state.get("source") == "user":
         m = state["message"]
         log.info("User set %s to %s; skipping triage", m.id, m.category)
-        trace_store.record("check_source", m, 0)
+        trace_store.record("manual_user_input", m, 0)
     return state
 
 
@@ -122,13 +124,16 @@ def route_by_source(state: State) -> Literal["save", "pre_triage"]:
 
 
 def _ignore_rule(m: EmailMessage) -> str | None:
-    """The name of the label rule that ignores this email, or None. Checks the user's own labels first, then Gmail's."""
+    """The rule that ignores this email without a model call, or None: your labels, Gmail's tabs, the ignore list."""
+    labels = {lbl.lstrip("\\").lower() for lbl in m.label_ids}  # Gmail's IMAP names: \\Sent, \\Draft, \\Important, ...
     for label in PRE_TRIAGE_IGNORE_LABELS:
-        if label in m.label_ids:
+        if label.lower() in labels:
             return f"label_{label.lower()}"
     for rule, query in IGNORE_BY_GMAIL.items():
         if _gmail().matches(m.id, query):
             return rule
+    if reason := ignore_list.label_for(memory_store.address(m.sender)):
+        return f"ignore_list_{reason}"
     return None
 
 
@@ -143,7 +148,11 @@ def pre_triage(state: State) -> State:
             log.info("Skipping triage for %s: already replied", m.id)
         elif rule := _ignore_rule(m):
             m.category, m.applied_rule = Category.IGNORE, rule
-            m.reason = f"Gmail label rule {rule}: sorted away from the primary inbox, so not worth triaging."
+            m.reason = (
+                f"Sender is on the pre-triage ignore list as {rule.removeprefix('ignore_list_')}."
+                if rule.startswith("ignore_list_")
+                else f"Gmail label rule {rule}: sorted away from the primary inbox, so not worth triaging."
+            )
             log.info("Skipping triage for %s: %s", m.id, rule)
     except Exception:
         log.exception("Pre-triage check failed for %s; triaging anyway", m.id)
@@ -158,25 +167,12 @@ def route_after_pre_triage(state: State) -> Literal["save", "recall"]:
 
 
 def recall(state: State) -> State:
-    """Load the preferences and what long-term memory knows about this sender."""
-    pref = memory_store.get(state["message"].sender)
-    if pref:
-        log.info("Memory for %s: %s x%d", pref.sender, pref.category, pref.count)
-    return {
-        "preferences": memory_store.preferences_text(),
-        "learned_rules": memory_store.learned_rules(),
-        "sender_memory": pref,
-    }
+    """Load the preferences block: base rules from code plus the learned rules."""
+    return {"preferences": memory_store.preferences_text(), "learned_rules": memory_store.learned_rules()}
 
 
-def _prompt_text(m: EmailMessage, pref: SenderPreference | None) -> str:
-    text = f"From: {m.sender}\nSubject: {m.subject}\n\n{m.body_text or m.snippet}"
-    if pref:
-        text += (
-            f"\n\nWhat you remember about this sender ({pref.count} past email(s)): "
-            f"last decision was `{pref.category}` because: {pref.reason}"
-        )
-    return text
+def _prompt_text(m: EmailMessage) -> str:
+    return f"From: {m.sender}\nSubject: {m.subject}\n\n{m.body_text or m.snippet}"
 
 
 def triage(state: State) -> State:
@@ -184,11 +180,11 @@ def triage(state: State) -> State:
     m = state["message"]
     log.info("Triaging mail from %s: %r", m.sender, m.subject)
     log.debug("%s\n%s\n%s", "-" * 80, m, "-" * 80)
-    text = _prompt_text(m, state.get("sender_memory"))
+    text = _prompt_text(m)
     system = f"{SYSTEM_PROMPT}\n\n{state.get('preferences') or memory_store.preferences_text()}"
     started = time.monotonic()
     try:
-        decision = ask(TriageDecision, system, text)
+        decision = ask(TriageDecision, system, text, run_name="triage_decision")
         m.category, m.reason, m.applied_rule = Category(decision.category), decision.reason, _rule_name(decision.rule)
         allowed = _reply_allowed(m.applied_rule, state.get("learned_rules", {}), m.sender)
         if m.category in HANDLED_CATEGORIES and not allowed:
@@ -203,10 +199,10 @@ def triage(state: State) -> State:
 
 
 def remember(state: State) -> State:
-    """Write the decision to long-term memory, unless triage failed and there is no decision to keep."""
+    """File a sender-stable ignore on the pre-triage ignore list; no other decision leaves anything behind."""
     m = state["message"]
-    if m.category is not Category.PENDING:
-        memory_store.remember(m)
+    if m.category is Category.IGNORE and (reason := ignore_list.reason_for(m.applied_rule, m.reason)):
+        ignore_list.add(memory_store.address(m.sender), reason)
     return state
 
 
@@ -223,7 +219,7 @@ def save(state: State) -> State:
 
 
 def route_by_category(state: State) -> Literal["inbox_manager", "__end__"]:
-    """Send agentrespond and agentdraftonly emails to the inbox manager; everything else is done."""
+    """Send auto_schedule and auto_draft emails to the inbox manager; everything else is done."""
     return "inbox_manager" if state["message"].category in HANDLED_CATEGORIES else END
 
 
@@ -248,4 +244,13 @@ email_triage_router_agent = _graph.compile()
 
 def triage_new_email(message: EmailMessage, source: Literal["cron", "user"] = "cron") -> EmailMessage:
     """Run the graph on one email and return it with category and reason filled in."""
-    return email_triage_router_agent.invoke({"message": message, "source": source})["message"]
+    run = {
+        "run_name": "email_triage_router",
+        "tags": [source],
+        "metadata": {
+            "email_id": message.id,
+            "thread_id": message.thread_id,
+            "sender": memory_store.address(message.sender),
+        },
+    }
+    return email_triage_router_agent.invoke({"message": message, "source": source}, config=run)["message"]

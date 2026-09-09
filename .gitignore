@@ -12,16 +12,11 @@ dist/
 
 # Secrets and OAuth material (python-backend); .env.example stays tracked
 python-backend/.env
-python-backend/credentials.json
-python-backend/token.json
+.secrets/
 
 # Local state and data written by the app
-python-backend/.mail_check_state.json
-python-backend/*.db
+python-backend/data/
 python-backend/logs/
-python-backend/long_term_memory.json
-python-backend/traces.jsonl
-python-backend/inbox_report.json
 
 # Editor and assistant files
 .idea/
@@ -29,3 +24,6 @@ python-backend/inbox_report.json
 .claude/
 CLAUDE.md
 .DS_Store
+
+# Local scratch that must never be committed
+do_not_checkin/

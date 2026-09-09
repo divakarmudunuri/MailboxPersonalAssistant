@@ -8,6 +8,7 @@ The watcher's cursor is "<UIDVALIDITY>:<last UID>" of the inbox.
 import email
 import imaplib
 import logging
+import smtplib
 from datetime import UTC, datetime, timedelta
 from email.header import decode_header, make_header
 from email.message import EmailMessage as MimeMessage
@@ -28,7 +29,9 @@ from .auth import load_credentials
 log = logging.getLogger(__name__)
 
 HOST = "imap.gmail.com"
+SMTP_HOST = "smtp.gmail.com"
 IDLE_RENEW_SECONDS = 25 * 60  # Gmail drops IDLE after about 29 minutes
+REPLIED_WINDOW_DAYS = 60  # how far back "the person replied in this thread" looks
 SOCKET_TIMEOUT = 120  # seconds; without it a half-open connection blocks a read forever with nothing to catch
 INBOX = "INBOX"
 _HEADERS = b"BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID)]"
@@ -278,28 +281,52 @@ class GmailImapClient:
         uids = sorted(self._imap.gmail_search(query), reverse=True)[:limit]
         return self._summaries(uids)
 
-    @reconnecting
-    def count_threads(self, query: str, cap: int = 100) -> int:
-        """How many distinct threads match a Gmail query, exact up to `cap`."""
+    def _thread_ids(self, query: str, cap: int) -> list[int]:
+        """Distinct thread ids of the newest messages matching a Gmail query, newest first, from All Mail."""
         self._select(self._special(ALL))
         uids = sorted(self._imap.gmail_search(query), reverse=True)[: cap * 4]
         if not uids:
-            return 0
-        thrids = {item[b"X-GM-THRID"] for item in self._imap.fetch(uids, [b"X-GM-THRID"]).values()}
+            return []
+        items = self._imap.fetch(uids, [b"X-GM-THRID"])
+        return list(dict.fromkeys(items[uid][b"X-GM-THRID"] for uid in uids if uid in items))
+
+    def _replied_threads(self) -> set[int]:
+        """Threads the person has sent a message in recently."""
+        self._select(self._special(ALL))
+        uids = self._imap.gmail_search(f"in:sent newer_than:{REPLIED_WINDOW_DAYS}d")
+        return {item[b"X-GM-THRID"] for item in self._imap.fetch(uids, [b"X-GM-THRID"]).values()} if uids else set()
+
+    @reconnecting
+    def sent_threads(self, days: int = REPLIED_WINDOW_DAYS) -> dict[str, datetime]:
+        """Threads the person sent a message in over the last `days` days: hex thread id -> latest send time (UTC)."""
+        self._select(self._special(ALL))
+        uids = self._imap.gmail_search(f"in:sent newer_than:{days}d")
+        latest: dict[str, datetime] = {}
+        for item in (self._imap.fetch(uids, [b"X-GM-THRID", b"INTERNALDATE"]) if uids else {}).values():
+            thrid, when = _hex(item[b"X-GM-THRID"]), _utc(item[b"INTERNALDATE"])
+            latest[thrid] = max(latest.get(thrid, when), when)
+        return latest
+
+    @reconnecting
+    def count_threads(self, query: str, cap: int = 1000, unanswered: bool = False) -> int:
+        """How many distinct threads match a Gmail query, exact up to `cap`; `unanswered` drops threads the person
+        has replied in."""
+        thrids = self._thread_ids(query, cap)
+        if unanswered:
+            replied = self._replied_threads()
+            thrids = [t for t in thrids if t not in replied]
         return min(len(thrids), cap)
 
     @reconnecting
-    def search_threads(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Threads matching a Gmail search query: the latest message of each, with message count and unread flag."""
-        self._select(self._special(ALL))
-        uids = sorted(self._imap.gmail_search(query), reverse=True)
-        if not uids:
-            return []
-        threads: dict[int, list[int]] = {}
-        for uid, item in self._imap.fetch(uids, [b"X-GM-THRID"]).items():
-            threads.setdefault(item[b"X-GM-THRID"], []).append(uid)
+    def search_threads(self, query: str, limit: int = 10, unanswered: bool = False) -> list[dict[str, Any]]:
+        """Threads matching a Gmail search query: the latest message of each, with message count and unread flag;
+        `unanswered` drops threads the person has replied in."""
+        thrids = self._thread_ids(query, limit * 4)
+        if unanswered:
+            replied = self._replied_threads()
+            thrids = [t for t in thrids if t not in replied]
         found = []
-        for thrid in list(threads)[:limit]:
+        for thrid in thrids[:limit]:
             all_uids = self._imap.search(["X-GM-THRID", str(thrid)])
             latest = self._summaries([max(all_uids)])[0]
             data = self._imap.fetch(all_uids, [b"FLAGS"])
@@ -479,3 +506,50 @@ class GmailImapClient:
         draft.set_content(body)
         self._imap.append(self._special(DRAFTS), draft.as_bytes(), flags=[b"\\Draft"])
         return draft["Message-ID"]
+
+    @reconnecting
+    def draft_on_thread(self, thread_id: str) -> dict[str, str] | None:
+        """The newest draft in Gmail's Drafts on this thread: to, subject, body, draft_message_id; None if none."""
+        uids = self._uids_for_thread(thread_id, self._special(DRAFTS))
+        if not uids:
+            return None
+        msg = email.message_from_bytes(self._imap.fetch([max(uids)], [b"RFC822"])[max(uids)][b"RFC822"])
+        return {
+            "to": _decode(msg.get("To")),
+            "subject": _decode(msg.get("Subject")),
+            "body": _text_body(msg),
+            "draft_message_id": _decode(msg.get("Message-ID")),
+        }
+
+    @reconnecting
+    def discard_draft(self, draft_message_id: str) -> bool:
+        """Delete a draft saved by `save_draft`, by its Message-ID."""
+        self._select(self._special(DRAFTS), readonly=False)
+        uids = self._imap.search(["HEADER", "Message-ID", draft_message_id])
+        if not uids:
+            return False
+        self._imap.delete_messages(uids)
+        self._imap.expunge()
+        return True
+
+    @reconnecting
+    def send_reply(self, message_id: str, to: str, subject: str, body: str) -> str:
+        """Send a reply to the message over SMTP with the same OAuth token; Gmail files it in Sent. Its Message-ID."""
+        reply = MimeMessage()
+        reply["From"], reply["To"], reply["Subject"] = self.address, to, subject
+        reply["Date"], reply["Message-ID"] = formatdate(localtime=True), make_msgid()
+        uids = self._uids_for_message(message_id, self._special(ALL))
+        if uids:
+            parent = _headers(self._imap.fetch(uids, [_HEADERS])[uids[0]][_HEADERS_KEY])["message-id"]
+            if parent:
+                reply["In-Reply-To"], reply["References"] = parent, parent
+        reply.set_content(body)
+        if self._creds.expired or not self._creds.token:
+            self._creds.refresh(Request())
+        with smtplib.SMTP_SSL(SMTP_HOST, 465, timeout=SOCKET_TIMEOUT) as smtp:
+            smtp.ehlo()
+            xoauth2 = f"user={self.address}\x01auth=Bearer {self._creds.token}\x01\x01"
+            smtp.auth("XOAUTH2", lambda challenge=None: xoauth2)
+            smtp.send_message(reply)
+        log.info("Sent reply to %s: %s", to, subject)
+        return reply["Message-ID"]

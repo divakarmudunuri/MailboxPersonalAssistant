@@ -8,9 +8,9 @@ class Category(StrEnum):
 
     IGNORE = "ignore"
     NOTIFY = "notify"
-    AGENT_RESPOND = "agentrespond"
+    AUTO_SCHEDULE = "auto_schedule"
     USER_REPLY_COMPLETE = "user_reply_complete"
-    AGENT_DRAFT_ONLY = "agentdraftonly"
+    AUTO_DRAFT = "auto_draft"
     PENDING = "pending"
 
 
@@ -29,4 +29,4 @@ class EmailMessage:
     category: Category = Category.PENDING
     reason: str = ""
     applied_rule: str = ""  # name of the base or learned rule behind the decision; "pre_triage" when triage was skipped
-    action: str = ""  # what the inbox manager did for agentrespond / agentdraftonly mail, in one line
+    action: str = ""  # what the inbox manager did for auto_schedule / auto_draft mail, in one line

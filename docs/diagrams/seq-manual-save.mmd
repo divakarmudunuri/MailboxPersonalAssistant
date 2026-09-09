@@ -1,6 +1,6 @@
 sequenceDiagram
     autonumber
-    participant UI as Triage tab
+    participant UI as Inbox tab
     participant API as FastAPI
     participant R as Triage router
     participant DB as SQLite
@@ -13,9 +13,9 @@ sequenceDiagram
     API->>R: triage_new_email(message, source=user), rule manual
     R->>R: check_source -> save (no pre_triage, no model)
     R->>DB: save
-    R->>Mem: remember: the correction becomes the sender's preference
-    R->>T: check_source line
-    alt agentrespond or agentdraftonly
+    R->>Mem: remember: an ignore with a sender-stable reason goes on the ignore list
+    R->>T: manual_user_input line
+    alt auto_schedule or auto_draft
         R->>M: handle(message)
     end
     API-->>UI: updated email

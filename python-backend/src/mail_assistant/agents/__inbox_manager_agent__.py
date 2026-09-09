@@ -1,14 +1,15 @@
 """The inbox manager: acts on one triaged email with the tools its category allows, guided by long-term memory.
 
 START -> recall -> act -+- get_thread / search_threads / now      (both categories)
-                        +- invite_details / find_calendar_events   (agentrespond: read)
-                        +- create_reminder / respond_to_invite     (agentrespond: write)
-                        +- save_draft                              (agentdraftonly: the only write)
+                        +- invite_details / find_calendar_events   (auto_schedule: read)
+                        +- create_reminder / respond_to_invite     (auto_schedule: write)
+                        +- save_draft                              (auto_draft: the only write)
                         +- unknown_tool / repeat                   --> back to act
                         +- (no tool calls) -> END
 
-agentrespond may change the calendar; agentdraftonly may only store a draft. Neither can send mail. What was done is
-written to the email's `action`, saved, and traced.
+auto_schedule may change the calendar; auto_draft may only store a draft. Neither can send mail. What was done is
+written to the email's `action`, saved, and traced. `draft_reply` runs the auto_draft path on any email for the
+Inbox tab's Reply button and hands the draft back for the person to edit and send.
 """
 
 import json
@@ -24,6 +25,7 @@ from mail_assistant.agents.llm.__structured_llm__ import chat_model
 from mail_assistant.agents.skills import __skills__ as skills
 from mail_assistant.agents.tools import __calendar_tools__ as calendar_tools
 from mail_assistant.agents.tools import __gmail_tools__ as gmail_tools
+from mail_assistant.config.__app_config__ import MANAGER_LLM
 from mail_assistant.db import __email_store__ as email_store
 from mail_assistant.db import __memory_store__ as memory_store
 from mail_assistant.db import __trace_store__ as trace_store
@@ -33,14 +35,14 @@ log = logging.getLogger(__name__)
 
 NAME = "manage"
 SKILL = skills.load("inbox-manager")
-HANDLED_CATEGORIES = (Category.AGENT_RESPOND, Category.AGENT_DRAFT_ONLY)
+HANDLED_CATEGORIES = (Category.AUTO_SCHEDULE, Category.AUTO_DRAFT)
 MAX_ROUNDS = 6
 TOOL_RESULT_CHARS = 8_000
 
 READ = [gmail_tools.get_thread, gmail_tools.search_threads, gmail_tools.now]
 TOOLS_BY_CATEGORY = {
-    Category.AGENT_RESPOND: [*READ, *calendar_tools.CALENDAR_TOOLS],
-    Category.AGENT_DRAFT_ONLY: [*READ, gmail_tools.save_draft],
+    Category.AUTO_SCHEDULE: [*READ, *calendar_tools.CALENDAR_TOOLS],
+    Category.AUTO_DRAFT: [*READ, gmail_tools.save_draft],
 }
 WRITE_TOOLS = {"create_reminder", "respond_to_invite", "save_draft"}
 ALL_TOOLS = {t.name: t for tools in TOOLS_BY_CATEGORY.values() for t in tools}
@@ -56,7 +58,6 @@ SYSTEM_PROMPT = """You are the inbox manager for {name}.
 {memory}"""
 
 TASK = """Category: {category}
-Sender memory: {sender_memory}
 
 The email:
 From: {sender}
@@ -86,11 +87,8 @@ class ManagerState(MessagesState):
 def recall(state: ManagerState) -> dict:
     """Load memory and describe the email; nothing here calls the model."""
     m = state["message"]
-    pref = memory_store.get(m.sender)
-    sender_memory = f"last decision {pref.category} (seen {pref.count}): {pref.reason}" if pref else "nothing yet"
     task = TASK.format(
         category=m.category.value,
-        sender_memory=sender_memory,
         sender=m.sender,
         subject=m.subject,
         received=m.received_at.isoformat(timespec="minutes"),
@@ -111,7 +109,7 @@ def act(state: ManagerState) -> dict:
     tools = TOOLS_BY_CATEGORY[state["message"].category]
     name = gmail_tools._mailbox().profile_email()
     prompt = SystemMessage(SYSTEM_PROMPT.format(name=name, skill=SKILL.body, memory=state["memory"]))
-    message = chat_model().bind_tools(tools).invoke([prompt, *state["messages"]])
+    message = chat_model(*MANAGER_LLM).bind_tools(tools).invoke([prompt, *state["messages"]])
     calls = message.tool_calls or []
     wants = "wants " + ", ".join(c["name"] for c in calls) if calls else "done"
     log.info("Manager round %d: %s", state["rounds"] + 1, wants)
@@ -198,15 +196,21 @@ def _outcome(messages: list) -> tuple[str, str]:
     return f"no action: {said[:200]}" if said else "no action", ",".join(dict.fromkeys(used))
 
 
-def handle(message: EmailMessage) -> EmailMessage:
-    """Run the manager on one email, record what it did on the email, save it, and write a trace line."""
-    if message.category not in HANDLED_CATEGORIES:
-        return message
+def _run(message: EmailMessage, as_category: Category) -> list:
+    """Run the agent on the email as `as_category`; record the action on the email, save and trace it. Returns the
+    transcript."""
     started = time.monotonic()
+    messages: list = []
     try:
-        config = {"recursion_limit": 4 + MAX_ROUNDS * 3}
-        final = inbox_manager_agent().invoke({"message": message, "messages": []}, config=config)
-        message.action, tools_used = _outcome(final["messages"])
+        config = {
+            "recursion_limit": 4 + MAX_ROUNDS * 3,
+            "run_name": "inbox_manager",
+            "tags": [as_category.value],
+            "metadata": {"email_id": message.id, "thread_id": message.thread_id},
+        }
+        state = {"message": replace(message, category=as_category), "messages": []}
+        messages = inbox_manager_agent().invoke(state, config=config)["messages"]
+        message.action, tools_used = _outcome(messages)
     except Exception as exc:
         log.exception("Inbox manager failed for %s", message.id)
         message.action, tools_used = f"failed: {exc}", ""
@@ -214,4 +218,28 @@ def handle(message: EmailMessage) -> EmailMessage:
     email_store.save(message)
     traced = replace(message, reason=message.action, applied_rule=tools_used or "none")
     trace_store.record("inbox_manager", traced, int((time.monotonic() - started) * 1000))
+    return messages
+
+
+def handle(message: EmailMessage) -> EmailMessage:
+    """Run the manager on one email of a handled category, recording what it did on the email."""
+    if message.category in HANDLED_CATEGORIES:
+        _run(message, message.category)
     return message
+
+
+def _saved_draft(messages: list) -> dict | None:
+    """The draft a transcript saved with `save_draft`: to, subject, body, draft_message_id. None if it saved none."""
+    calls = {c["id"]: c for m in messages for c in (getattr(m, "tool_calls", None) or []) if c["name"] == "save_draft"}
+    saved = [m for m in messages if isinstance(m, ToolMessage) and m.name == "save_draft" and "Message-ID" in m.content]
+    if not saved:
+        return None
+    args = calls[saved[-1].tool_call_id]["args"]
+    draft_id = saved[-1].content.split("Message-ID", 1)[1].strip()
+    return {"to": args["to"], "subject": args["subject"], "body": args["body"], "draft_message_id": draft_id}
+
+
+def draft_reply(message: EmailMessage) -> dict | None:
+    """Have the manager draft a reply to any email (the auto_draft path, whatever its category) and return the
+    draft it saved in Gmail's Drafts. None if it wrote none; the reason is in `message.action`."""
+    return _saved_draft(_run(message, Category.AUTO_DRAFT))

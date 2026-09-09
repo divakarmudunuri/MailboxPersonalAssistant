@@ -3,24 +3,24 @@ sequenceDiagram
     participant R as Triage router
     participant M as Inbox manager
     participant Mem as Memory store
-    participant LLM as Model (LLM_PROVIDER)
+    participant LLM as Model (MANAGER_LLM)
     participant Gmail as Gmail (IMAP)
     participant Cal as Google Calendar
     participant DB as SQLite
     participant T as Trace file
 
     R->>M: handle(message)
-    M->>Mem: preferences block + sender fact (recall)
+    M->>Mem: preferences block (recall)
     loop up to MAX_ROUNDS
         M->>LLM: skill + memory + the email, category's tools bound
         alt tool call
             LLM-->>M: get_thread / search_threads / now
             M->>Gmail: read
-        else agentrespond tool call
+        else auto_schedule tool call
             LLM-->>M: invite_details, find_calendar_events, create_reminder, respond_to_invite
             M->>Gmail: text/calendar part of the email
             M->>Cal: find event by UID, create event, or set RSVP
-        else agentdraftonly tool call
+        else auto_draft tool call
             LLM-->>M: save_draft
             M->>Gmail: APPEND to Drafts, threaded on the email
         else not allowed for this category

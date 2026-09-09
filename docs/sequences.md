@@ -14,7 +14,7 @@ How the main flows move through the app. Names match the modules in [architectur
 
 <sub>Source: [diagrams/seq-inbox-manager.mmd](diagrams/seq-inbox-manager.mmd)</sub>
 
-## 3. Saving a category by hand in the Triage tab
+## 3. Saving a category by hand in the Inbox tab
 
 ![seq-manual-save](images/seq-manual-save.svg)
 
@@ -26,7 +26,7 @@ How the main flows move through the app. Names match the modules in [architectur
 
 <sub>Source: [diagrams/seq-memory-chat.mmd](diagrams/seq-memory-chat.mmd)</sub>
 
-## 5. Building the inbox briefing
+## 5. Building the Quick Overview
 
 ![seq-briefing](images/seq-briefing.svg)
 

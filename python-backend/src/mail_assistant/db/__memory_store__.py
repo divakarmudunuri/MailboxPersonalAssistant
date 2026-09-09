@@ -1,16 +1,13 @@
-"""Long-term memory: base rules fixed in code, plus a JSON file of learned preferences and per-sender facts."""
+"""Long-term memory: base rules fixed in code, plus a JSON file of learned preferences."""
 
 import json
-from dataclasses import asdict
 from email.utils import parseaddr
 
 from mail_assistant.config.__app_config__ import MEMORY_FILE
-from mail_assistant.models.__email_message_model__ import Category, EmailMessage
 from mail_assistant.models.__long_term_memory_model__ import LongTermMemory
-from mail_assistant.models.__sender_preference_model__ import SenderPreference
 
 # The baseline the person started from: named rules, always in the prompt. Base rules only ever decide `ignore` or
-# `notify`; replies (agentrespond, agentdraftonly) happen only when a learned rule from chat asks for them. Chat can
+# `notify`; replies (auto_schedule, auto_draft) happen only when a learned rule from chat asks for them. Chat can
 # only add learned rules on top, and a learned rule wins when the two conflict.
 LONG_TERM_MEMORY: list[tuple[str, str, str]] = [  # (rule name, what it covers, outcome)
     ("marketing_promotions", "Marketing newsletters and promotional emails", "ignore"),
@@ -53,18 +50,11 @@ def load() -> LongTermMemory:
     """Read the memory file; an absent file is an empty memory."""
     if not MEMORY_FILE.exists():
         return LongTermMemory()
-    raw = json.loads(MEMORY_FILE.read_text())
-    senders = {
-        s: SenderPreference(sender=s, category=Category(p["category"]), reason=p["reason"], count=p["count"])
-        for s, p in raw.get("senders", {}).items()
-    }
-    return LongTermMemory(learned_preferences=raw.get("learned_preferences", ""), senders=senders)
+    return LongTermMemory(learned_preferences=json.loads(MEMORY_FILE.read_text()).get("learned_preferences", ""))
 
 
 def _dump(memory: LongTermMemory) -> None:
-    senders = {s: {k: v for k, v in asdict(p).items() if k != "sender"} for s, p in memory.senders.items()}
-    raw = {"learned_preferences": memory.learned_preferences, "senders": senders}
-    MEMORY_FILE.write_text(json.dumps(raw, indent=2, sort_keys=True))
+    MEMORY_FILE.write_text(json.dumps({"learned_preferences": memory.learned_preferences}, indent=2))
 
 
 def preferences_text() -> str:
@@ -74,12 +64,6 @@ def preferences_text() -> str:
         f"## Base rules (name: what it covers -> outcome)\n{base_rules_text()}\n\n"
         f"## Learned rules (name: rule; these win over base rules)\n{learned}"
     )
-
-
-def sender_facts_text() -> str:
-    """Every remembered sender as a prompt line: `- address: category (seen N): reason`."""
-    senders = sorted(load().senders.values(), key=lambda p: p.sender)
-    return "\n".join(f"- {p.sender}: {p.category} (seen {p.count}): {p.reason}" for p in senders) or "(none yet)"
 
 
 def learned_rules() -> dict[str, str]:
@@ -95,18 +79,3 @@ def update_preferences(text: str) -> LongTermMemory:
     memory.learned_preferences = text.strip()
     _dump(memory)
     return memory
-
-
-def get(sender: str) -> SenderPreference | None:
-    """What is remembered about this sender, if anything."""
-    return load().senders.get(address(sender))
-
-
-def remember(message: EmailMessage) -> SenderPreference:
-    """Record the message's category and reason as the latest decision for its sender."""
-    memory = load()
-    key = address(message.sender)
-    seen = memory.senders[key].count + 1 if key in memory.senders else 1
-    memory.senders[key] = SenderPreference(sender=key, category=message.category, reason=message.reason, count=seen)
-    _dump(memory)
-    return memory.senders[key]

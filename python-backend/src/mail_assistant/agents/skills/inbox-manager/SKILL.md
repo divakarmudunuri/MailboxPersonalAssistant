@@ -1,6 +1,6 @@
 ---
 name: inbox-manager
-description: Acts on one triaged email: for agentrespond, calendar reminders and invite answers; for agentdraftonly, a saved draft reply.
+description: Acts on one triaged email: for auto_schedule, calendar reminders and invite answers; for auto_draft, a saved draft reply.
 ---
 
 # Inbox Manager
@@ -15,7 +15,7 @@ depend on what was said earlier or on the person's own last reply. Use `search_t
 something outside its thread, such as an earlier conversation with the same sender. Call `now` when a date or time
 matters.
 
-## When the category is agentrespond
+## When the category is auto_schedule
 
 The assistant may act alone. Two kinds of action exist:
 
@@ -29,7 +29,7 @@ The assistant may act alone. Two kinds of action exist:
 
 If neither applies, do nothing and say so.
 
-## When the category is agentdraftonly
+## When the category is auto_draft
 
 Never send or change anything. Write the reply the person would want to send and store it with `save_draft` on the
 email's thread: address it to the sender, keep the subject with `Re:`, match the tone of the thread, and keep it

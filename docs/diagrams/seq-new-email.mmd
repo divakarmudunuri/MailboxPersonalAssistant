@@ -2,34 +2,37 @@ sequenceDiagram
     autonumber
     participant Gmail as Gmail (IMAP)
     participant W as Mail watcher
+    participant C as Triage cron
     participant R as Triage router
     participant Mem as Memory store
-    participant LLM as Model (LLM_PROVIDER)
+    participant LLM as Model (TRIAGE_LLM)
     participant DB as SQLite
     participant T as Trace file
     participant M as Inbox manager
 
     Gmail-->>W: IDLE: inbox changed
     W->>Gmail: UIDs after cursor, FETCH message
-    W->>R: triage_new_email(message, source=cron)
+    W->>DB: save as pending
+    W->>W: save cursor (UIDVALIDITY:UID)
+    C->>DB: untriaged rows, every TRIAGE_INTERVAL_SECONDS
+    C->>R: triage_new_email(message, source=cron)
     R->>R: check_source -> pre_triage
     R->>Gmail: Sent folder has a later message in this thread?
     alt already replied
         R->>R: user_reply_complete, rule pre_triage
-    else Gmail says promotions / social / forums / spam / muted
-        R->>R: ignore, rule gmail_*
+    else Gmail says promotions / social / forums / spam / muted, or the sender is on the ignore list
+        R->>R: ignore, rule gmail_* / label_* / ignore_list_*
     else needs the model
-        R->>Mem: preferences block + sender fact (recall)
-        R->>LLM: system prompt (scaffold + memory), user turn (email + sender fact)
+        R->>Mem: preferences block (recall)
+        R->>LLM: system prompt (scaffold + memory), user turn (email)
         LLM-->>R: category, reason, rule (structured)
         R->>R: reply category without a learned rule? downgrade to notify
     end
     R->>T: pre_triage and triage lines
     R->>DB: save
-    R->>Mem: remember sender decision (not for pending)
-    alt agentrespond or agentdraftonly
+    R->>Mem: sender-stable ignore -> pre-triage ignore list
+    alt auto_schedule or auto_draft
         R->>M: handle(message)
         M-->>R: action recorded on the email
     end
-    R-->>W: message
-    W->>W: save cursor (UIDVALIDITY:UID)
+    R-->>C: message
