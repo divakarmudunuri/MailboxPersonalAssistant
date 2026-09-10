@@ -87,6 +87,14 @@ class ManagerState(MessagesState):
 def recall(state: ManagerState) -> dict:
     """Load memory and describe the email; nothing here calls the model."""
     m = state["message"]
+    allowed = [t.name for t in TOOLS_BY_CATEGORY[m.category]]
+    note = ""
+    if m.category is Category.AUTO_SCHEDULE and _carries_invitation(m):
+        allowed.remove("create_reminder")
+        note = (
+            "\n\nThis email carries a calendar invitation (a text/calendar part). Read it with invite_details, then "
+            "answer it with respond_to_invite. Do not create a reminder for it; create_reminder is not available here."
+        )
     task = TASK.format(
         category=m.category.value,
         sender=m.sender,
@@ -99,9 +107,18 @@ def recall(state: ManagerState) -> dict:
     return {
         "memory": memory_store.preferences_text(),
         "rounds": 0,
-        "allowed": [t.name for t in TOOLS_BY_CATEGORY[m.category]],
-        "messages": [{"role": "user", "content": task}],
+        "allowed": allowed,
+        "messages": [{"role": "user", "content": task + note}],
     }
+
+
+def _carries_invitation(m: EmailMessage) -> bool:
+    """True when the email has a text/calendar part; an IMAP hiccup counts as no."""
+    try:
+        return any(p["content_type"] == "text/calendar" for p in gmail_tools._mailbox().list_parts(m.id))
+    except Exception:
+        log.exception("Could not list parts of %s", m.id)
+        return False
 
 
 def act(state: ManagerState) -> dict:

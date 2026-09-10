@@ -143,10 +143,11 @@ def list_emails(
 
 @app.get("/api/emails/{email_id}")
 def get_email(email_id: str) -> EmailMessage:
-    """One email by id."""
-    message = email_store.get(email_id)
-    if message is None:
-        raise HTTPException(404, "email not found")
+    """One email by id; a row stored with an empty body (older parser, HTML-only mail) is filled from the mailbox."""
+    message = _stored(email_id)
+    if not message.body_text and (body := gmail_tools._mailbox().body_of(message.id)):
+        message.body_text, message.snippet = body, " ".join(body.split())[:200]
+        email_store.save(message)
     return message
 
 

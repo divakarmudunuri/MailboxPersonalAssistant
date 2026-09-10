@@ -6,8 +6,10 @@ The watcher's cursor is "<UIDVALIDITY>:<last UID>" of the inbox.
 """
 
 import email
+import html
 import imaplib
 import logging
+import re
 import smtplib
 from datetime import UTC, datetime, timedelta
 from email.header import decode_header, make_header
@@ -62,15 +64,36 @@ def _decode(value) -> str:
         return value
 
 
+def _html_text(markup: str) -> str:
+    """Plain text from an HTML body: scripts and styles dropped, block tags become line breaks, entities decoded."""
+    text = re.sub(r"(?is)<(script|style).*?</\1>", " ", markup)
+    text = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h\d|table)>", "\n", text)
+    text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    return "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
+
+
 def _text_body(msg: Message) -> str:
-    """The text/plain parts of a parsed message, joined."""
+    """The message body as text: the text/plain parts, else the text/html parts converted, plus one line naming each
+    attachment so a bill or a ticket that arrives only as a file is still visible."""
     parts = msg.walk() if msg.is_multipart() else [msg]
-    texts = []
+    plain, markup, attachments = [], [], []
     for part in parts:
-        if part.get_content_type() == "text/plain" and not part.get("Content-Disposition", "").startswith("attachment"):
-            payload = part.get_payload(decode=True) or b""
-            texts.append(payload.decode(part.get_content_charset() or "utf-8", "replace"))
-    return "\n".join(t for t in texts if t)
+        if part.get_content_maintype() == "multipart":
+            continue
+        name = part.get_filename()
+        attached = part.get("Content-Disposition", "").startswith("attachment")
+        if attached or (name and part.get_content_maintype() != "text"):
+            attachments.append(" ".join(_decode(name).split()) if name else part.get_content_type())
+            continue
+        payload = (part.get_payload(decode=True) or b"").decode(part.get_content_charset() or "utf-8", "replace")
+        if part.get_content_type() == "text/plain":
+            plain.append(payload)
+        elif part.get_content_type() == "text/html":
+            markup.append(payload)
+    body = "\n".join(t for t in plain if t.strip()) or "\n".join(_html_text(h) for h in markup)
+    if attachments:
+        body += ("\n\n" if body else "") + "\n".join(f"[Attachment: {a}]" for a in attachments)
+    return body
 
 
 def _headers(raw: bytes) -> dict[str, str]:
@@ -207,6 +230,14 @@ class GmailImapClient:
             body_text=body,
             label_ids=[INBOX, *labels],
         )
+
+    @reconnecting
+    def body_of(self, message_id: str) -> str:
+        """The body text of one message by Gmail id, from All Mail; "" if it is gone."""
+        uids = self._uids_for_message(message_id, self._special(ALL))
+        if not uids:
+            return ""
+        return _text_body(email.message_from_bytes(self._imap.fetch([uids[0]], [b"RFC822"])[uids[0]][b"RFC822"]))
 
     @reconnecting
     def has_been_replied_to(self, message: EmailMessage) -> bool:

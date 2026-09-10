@@ -56,6 +56,22 @@ class GoogleCalendarClient:
         )
         return [self._summarize(e) for e in listed.get("items", [])]
 
+    def import_invitation(
+        self, ical_uid: str, summary: str, start: str, end: str, organizer: str = ""
+    ) -> dict[str, Any]:
+        """Add an emailed invitation to the calendar under its own iCal UID (Google only does this for Google invites),
+        with this account as an attendee who has not answered yet. `start` and `end` are ISO-8601 with an offset."""
+        body = {
+            "iCalUID": ical_uid,
+            "summary": summary,
+            "start": {"dateTime": start},
+            "end": {"dateTime": end},
+            "attendees": [{"email": GMAIL_ADDRESS, "responseStatus": "needsAction"}],
+        }
+        if organizer:
+            body["organizer"] = {"email": organizer}
+        return self._summarize(self._events().import_(calendarId=CALENDAR, body=body).execute())
+
     def find_by_ical_uid(self, ical_uid: str) -> dict[str, Any] | None:
         """The calendar's copy of an emailed invitation, matched by the invitation's UID."""
         listed = self._events().list(calendarId=CALENDAR, iCalUID=ical_uid, maxResults=1).execute()

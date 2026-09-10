@@ -239,6 +239,8 @@ export default function InboxView({ open = null }) {
               <p className="meta">From {selected.sender} · {fmtDate(selected.received_at)}</p>
               {selected.category === "user_reply_complete" ? (
                 <p className="hint">You already replied on this thread{selected.action ? ` (${selected.action})` : ""}.</p>
+              ) : selected.category === "auto_schedule" ? (
+                <p className="hint">Handled on the calendar by the inbox manager{selected.action ? ` (${selected.action})` : ""}.</p>
               ) : (
               <div className="buttons">
                 <button onClick={markRead} disabled={!selected.label_ids.includes("UNREAD")}>

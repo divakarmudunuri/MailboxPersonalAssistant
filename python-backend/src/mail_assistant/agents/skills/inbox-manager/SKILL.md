@@ -19,9 +19,11 @@ matters.
 
 The assistant may act alone. Two kinds of action exist:
 
-- A meeting invitation: use `invite_details` to read it, then `respond_to_invite` with accepted, declined, or
-  tentative according to the person's rules about meetings (time windows, senders, kinds of meeting). Outside those
-  rules, answer tentative rather than guessing.
+- A meeting invitation (the email carries a calendar file): call `invite_details` first; it reads the invitation and
+  makes sure the calendar has a copy, returning its `event_id`. Then `respond_to_invite` with that `event_id` and
+  accepted, declined, or tentative according to the person's rules about meetings (time windows, senders, kinds of
+  meeting). Outside those rules, answer tentative rather than guessing. Never create a reminder for an invitation:
+  answering it puts it on the calendar.
 - Anything that names a date or time the person should be reminded of, such as a class, an appointment, a deadline,
   or a delivery window: `create_reminder` with a clear title, the correct start and end in the person's local time
   with a UTC offset, and a note saying which email it came from. Check `find_calendar_events` first so you do not
