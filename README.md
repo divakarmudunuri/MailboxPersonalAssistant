@@ -4,6 +4,12 @@ A personal assistant for a Gmail inbox, built as a CMU capstone project. It watc
 email with a language model guided by long-term memory, acts on some of them, and writes a start-of-day Quick Overview.
 You review and correct it from a small web UI, and teach it rules in a chat.
 
+## Demo
+
+[![Watch the demo on YouTube](https://img.youtube.com/vi/HMPWVJ34wCo/maxresdefault.jpg)](https://www.youtube.com/watch?v=HMPWVJ34wCo)
+
+A walkthrough of the app: triage, the Quick Overview, the inbox manager acting on mail, and the Memory tab.
+
 ## What it does
 
 - **Triage.** Each new email gets a category: `ignore`, `notify`, `auto_schedule`, `auto_draft`,
