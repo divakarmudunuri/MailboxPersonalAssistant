@@ -6,7 +6,7 @@ You review and correct it from a small web UI, and teach it rules in a chat.
 
 ## Demo
 
-[![Watch the demo on YouTube](https://img.youtube.com/vi/HMPWVJ34wCo/maxresdefault.jpg)](https://www.youtube.com/watch?v=HMPWVJ34wCo)
+[![Watch the demo on YouTube](https://img.youtube.com/vi/cPCxRXJZnSk/maxresdefault.jpg)](https://www.youtube.com/watch?v=cPCxRXJZnSk)
 
 A walkthrough of the app: triage, the Quick Overview, the inbox manager acting on mail, and the Memory tab.
 
