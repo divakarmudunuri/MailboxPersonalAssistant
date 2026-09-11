@@ -11,6 +11,7 @@ Mermaid sources in `diagrams/`, so they show in any Markdown viewer.
 | [sequences.md](sequences.md) | Sequence diagrams: a new email, the inbox manager acting, a manual save, teaching a preference, building the Quick Overview, startup and authentication |
 | [state-graphs.md](state-graphs.md) | The three LangGraph state graphs as drawn by LangGraph, with their state schemas and node tables |
 | [data.md](data.md) | The entities, every persisted file, the `applied_rule` and `action` vocabularies, and the settings that matter most |
+| [run-stats-2026-09-11.md](run-stats-2026-09-11.md) | Measured statistics of a full 30-day backfill run: volume, wall-clock, per-step and per-email times |
 
 Running and configuring the app is described in [`../python-backend/README.md`](../python-backend/README.md);
 conventions for working on the code are in [`../CLAUDE.md`](../CLAUDE.md).

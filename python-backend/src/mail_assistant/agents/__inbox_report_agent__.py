@@ -378,7 +378,9 @@ def generate(force: bool = False) -> dict:
     final = inbox_report_agent().invoke(state, config={"run_name": "inbox_report"})
     snap, elapsed = final["snapshot"], int((time.monotonic() - started) * 1000)
     if final["overview"] is None:
-        trace_store.record_run("inbox_report", "Quick Overview", "unchanged", "nothing new since last build", elapsed)
+        trace_store.record_run(
+            "inbox_report", "Quick Overview", "unchanged", "nothing new since last build", elapsed, "reused_overview"
+        )
         return load_cached()
     briefing, item_ids = _render(snap, final["overview"])
     report = {
@@ -396,7 +398,7 @@ def generate(force: bool = False) -> dict:
     }
     REPORT_FILE.write_text(json.dumps(report, indent=2))
     summary = f"{len(item_ids)} items from {len(snap['candidates'])} threads: {final['overview'].first_thing[:140]}"
-    trace_store.record_run("inbox_report", "Quick Overview", "write", summary, elapsed)
+    trace_store.record_run("inbox_report", "Quick Overview", "write", summary, elapsed, "built_overview")
     return report
 
 

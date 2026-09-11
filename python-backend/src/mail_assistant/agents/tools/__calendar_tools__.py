@@ -2,8 +2,8 @@
 
 import json
 import re
+import threading
 from datetime import UTC, datetime, timedelta
-from functools import cache
 from zoneinfo import ZoneInfo
 
 from langchain_core.tools import tool
@@ -14,9 +14,14 @@ from mail_assistant.gmail_client.calendar import GoogleCalendarClient
 RESPONSES = ("accepted", "declined", "tentative")
 
 
-@cache
+_local = threading.local()
+
+
 def _calendar() -> GoogleCalendarClient:
-    return GoogleCalendarClient()
+    """One calendar client per thread: the Google API client is not thread-safe."""
+    if not hasattr(_local, "calendar"):
+        _local.calendar = GoogleCalendarClient()
+    return _local.calendar
 
 
 def _dump(value) -> str:

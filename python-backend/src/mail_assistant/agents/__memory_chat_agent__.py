@@ -87,6 +87,20 @@ def _apply(rules: dict[str, str], edit: MemoryEdit, message: str) -> dict[str, s
     return updated
 
 
+def _trace_rule_changes(before: dict[str, str], after: dict[str, str], message: str) -> None:
+    """One `memory` trace line per learned rule the chat message added, changed, or removed."""
+    if before and not after:
+        trace_store.record_learning("learned_rules_cleared", f"{len(before)} rules", "memory_chat", message)
+        return
+    for name in after.keys() - before.keys():
+        trace_store.record_learning("learned_rule_added", f"{name}: {after[name]}"[:200], "memory_chat", message)
+    for name in before.keys() - after.keys():
+        trace_store.record_learning("learned_rule_removed", f"{name}: {before[name]}"[:200], "memory_chat", message)
+    for name in after.keys() & before.keys():
+        if after[name] != before[name]:
+            trace_store.record_learning("learned_rule_changed", f"{name}: {after[name]}"[:200], "memory_chat", message)
+
+
 def chat(message: str) -> MemoryEdit:
     """Apply one chat message to the learned preferences and return the result."""
     current = memory_store.load().learned_preferences.strip() or "(none yet)"
@@ -100,9 +114,11 @@ def chat(message: str) -> MemoryEdit:
     after = _apply(before, edit, message)
     if after != before:
         memory_store.update_preferences("\n".join(f"- {name}: {text}" for name, text in after.items()))
+        _trace_rule_changes(before, after, message)
     if any(name in after for name in edit.remove):  # the model wanted to drop a rule the message did not ask about
         edit.reply += " Nothing was removed; to drop a rule, say remove, delete, or clear."
     log.info("Learned preferences via chat (%+d rules): %s", len(after) - len(before), edit.reply)
     rule = "rules_updated" if after != before else "rules_unchanged"
-    trace_store.record_run("memory_chat", message, rule, edit.reply, int((time.monotonic() - started) * 1000))
+    action = "rules_unchanged" if after == before else "cleared_rules" if not after else "updated_rules"
+    trace_store.record_run("memory_chat", message, rule, edit.reply, int((time.monotonic() - started) * 1000), action)
     return edit

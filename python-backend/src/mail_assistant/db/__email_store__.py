@@ -11,28 +11,31 @@ from mail_assistant.models.__email_message_model__ import Category, EmailMessage
 SCHEMA = """CREATE TABLE IF NOT EXISTS emails (
     id TEXT PRIMARY KEY, thread_id TEXT, subject TEXT, sender TEXT, received_at TEXT,
     snippet TEXT, body_text TEXT, label_ids TEXT, category TEXT, reason TEXT, applied_rule TEXT DEFAULT '',
-    action TEXT DEFAULT '')"""
+    action TEXT DEFAULT '', triage_attempts INTEGER DEFAULT 0)"""
+MAX_TRIAGE_ATTEMPTS = 3  # passes that crash before the router records anything, before the row is left alone
 
 
 RENAMED = {"agentrespond": "auto_schedule", "agentdraftonly": "auto_draft"}  # older files carry the old names
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30)  # triage workers write at once; wait for the lock, do not fail
     conn.row_factory = sqlite3.Row
     conn.execute(SCHEMA)
     for old, new in RENAMED.items():
         conn.execute("UPDATE emails SET category = ? WHERE category = ?", (new, old))
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(emails)")}
-    for column in ("applied_rule", "action"):  # databases created before these columns existed
+    added = {"applied_rule": "TEXT DEFAULT ''", "action": "TEXT DEFAULT ''", "triage_attempts": "INTEGER DEFAULT 0"}
+    for column, kind in added.items():  # databases created before these columns existed
         if column not in columns:
-            conn.execute(f"ALTER TABLE emails ADD COLUMN {column} TEXT DEFAULT ''")
+            conn.execute(f"ALTER TABLE emails ADD COLUMN {column} {kind}")
     return conn
 
 
 def _to_message(row: sqlite3.Row) -> EmailMessage:
     """Decode a database row into a message; inverse of _to_row."""
     d = dict(row)
+    d.pop("triage_attempts", None)  # bookkeeping for the triage cron, not part of the message
     d["received_at"] = datetime.fromisoformat(d["received_at"])
     d["label_ids"] = json.loads(d["label_ids"])
     d["category"] = Category(d["category"])
@@ -52,8 +55,10 @@ def save(message: EmailMessage) -> None:
     """Insert or replace the message."""
     with _connect() as conn:
         conn.execute(
-            "INSERT OR REPLACE INTO emails VALUES (:id, :thread_id, :subject, :sender, :received_at, :snippet, "
-            ":body_text, :label_ids, :category, :reason, :applied_rule, :action)",
+            "INSERT OR REPLACE INTO emails (id, thread_id, subject, sender, received_at, snippet, body_text, "
+            "label_ids, category, reason, applied_rule, action, triage_attempts) "
+            "VALUES (:id, :thread_id, :subject, :sender, :received_at, :snippet, :body_text, :label_ids, :category, "
+            ":reason, :applied_rule, :action, COALESCE((SELECT triage_attempts FROM emails WHERE id = :id), 0))",
             _to_row(message),
         )
 
@@ -80,10 +85,22 @@ def untriaged(limit: int = 50) -> list[EmailMessage]:
     row with a "triage failed" reason has been seen and is not retried here."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM emails WHERE category = ? AND reason = '' ORDER BY received_at ASC LIMIT ?",
-            (Category.PENDING.value, limit),
+            "SELECT * FROM emails WHERE category = ? AND reason = '' AND triage_attempts < ? "
+            "ORDER BY received_at ASC LIMIT ?",
+            (Category.PENDING.value, MAX_TRIAGE_ATTEMPTS, limit),
         ).fetchall()
     return [_to_message(r) for r in rows]
+
+
+def note_failed_attempt(email_id: str) -> None:
+    """Count a triage pass that crashed before the router could record anything; after MAX_TRIAGE_ATTEMPTS the row
+    is left pending with a reason, so it shows in the Inbox tab instead of being retried forever."""
+    with _connect() as conn:
+        conn.execute("UPDATE emails SET triage_attempts = triage_attempts + 1 WHERE id = ?", (email_id,))
+        conn.execute(
+            "UPDATE emails SET reason = ? WHERE id = ? AND reason = '' AND triage_attempts >= ?",
+            (f"triage failed after {MAX_TRIAGE_ATTEMPTS} attempts", email_id, MAX_TRIAGE_ATTEMPTS),
+        )
 
 
 WAITING = (Category.NOTIFY, Category.AUTO_DRAFT, Category.PENDING)  # triage items still waiting on the person

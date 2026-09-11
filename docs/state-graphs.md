@@ -29,7 +29,7 @@ hand in the Inbox tab (with `source = "user"`).
 | Node | What it does | Model call |
 | --- | --- | --- |
 | `check_source` | A category set by hand in the UI skips everything and goes to `save`, after a `manual_user_input` trace line. | no |
-| `pre_triage` | Already replied (a later message of yours in the thread) becomes `user_reply_complete`; Gmail Promotions, Social, Forums, Spam, muted, one of your `PRE_TRIAGE_IGNORE_LABELS`, or a sender on the pre-triage ignore list becomes `ignore`. Either skips to `save`. | no |
+| `pre_triage` | Already replied (a later message of yours in the thread) becomes `user_reply_complete`; a sender on the keep list always goes to the model; one of your `PRE_TRIAGE_IGNORE_LABELS`, a muted thread, or a sender on the pre-triage ignore list becomes `ignore` (Gmail's Promotions, Social, and Forums tabs are not used as decisions); an automated sender (no-reply, notification, alert, receipt, mailer-daemon) that no learned rule names becomes `notify` (rule `automated_sender`). Any of these skips to `save`. | no |
 | `recall` | Loads the preferences block (base rules from code plus learned rules). | no |
 | `triage` | Asks the configured model for category, reason, and the rule applied; downgrades a reply category that no learned rule supports to `notify`. On failure the email is stored `pending`. | yes |
 | `save` | Writes the email to SQLite. | no |

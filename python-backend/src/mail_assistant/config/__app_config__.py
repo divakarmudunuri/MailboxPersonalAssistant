@@ -20,6 +20,7 @@ STATE_FILE = DATA_DIR / "mail_check_state.json"  # the watcher's cursor; delete 
 DB_FILE = DATA_DIR / "mail_assistant.db"
 MEMORY_FILE = DATA_DIR / "long_term_memory.json"
 PRE_TRIAGE_IGNORE_FILE = DATA_DIR / "pre_triage_ignore_list.json"
+PRE_TRIAGE_KEEP_FILE = DATA_DIR / "pre_triage_keep_list.json"
 TRACE_FILE = DATA_DIR / "traces.jsonl"
 REPORT_FILE = DATA_DIR / "inbox_report.json"
 UI_DIST_DIR = BACKEND_DIR.parent / "react-frontend" / "dist"
@@ -31,6 +32,7 @@ MAIL_BACKFILL_DAYS = int(os.environ.get("MAIL_BACKFILL_DAYS", "0"))  # on a fres
 PRE_TRIAGE_IGNORE_LABELS = [x.strip() for x in os.environ.get("PRE_TRIAGE_IGNORE_LABELS", "").split(",") if x.strip()]
 REPORT_INTERVAL_SECONDS = float(os.environ.get("REPORT_INTERVAL_SECONDS", str(3 * 3600)))
 TRIAGE_INTERVAL_SECONDS = float(os.environ.get("TRIAGE_INTERVAL_SECONDS", "30"))  # how often stored mail is triaged
+TRIAGE_WORKERS = int(os.environ.get("TRIAGE_WORKERS", "5"))  # emails triaged at once per pass; threads start on demand
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 OLLAMA_NUM_CTX = int(os.environ.get("OLLAMA_NUM_CTX", "32768"))  # Ollama defaults to 4096 and silently truncates

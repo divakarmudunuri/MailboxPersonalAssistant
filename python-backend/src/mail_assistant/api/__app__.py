@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from mail_assistant.agents import __feedback_agent__ as feedback_agent
 from mail_assistant.agents import __inbox_manager_agent__ as inbox_manager
 from mail_assistant.agents import __inbox_report_agent__ as inbox_report
 from mail_assistant.agents.__email_triage_router_agent__ import email_triage_router_agent, triage_new_email
@@ -15,6 +16,7 @@ from mail_assistant.config.__app_config__ import UI_DIST_DIR, configure_logging
 from mail_assistant.db import __email_store__ as email_store
 from mail_assistant.db import __memory_store__ as memory_store
 from mail_assistant.db import __pre_triage_ignore_store__ as ignore_list
+from mail_assistant.db import __pre_triage_keep_store__ as keep_list
 from mail_assistant.db import __trace_store__ as trace_store
 from mail_assistant.models.__email_message_model__ import Category, EmailMessage
 from mail_assistant.models.__pre_triage_ignore_model__ import IgnoreEntry, IgnoreReason
@@ -29,6 +31,22 @@ class CategoryUpdate(BaseModel):
 
     category: Category
     reason: str = ""
+
+
+class Retriage(BaseModel):
+    """Body of the triage-again endpoint: the person's feedback in prose."""
+
+    reason: str
+
+
+class RetriageResult(BaseModel):
+    """The email after triage ran again, plus what the feedback changed."""
+
+    email: EmailMessage
+    reply: str
+    kept: bool
+    ignored: str
+    rule_added: str
 
 
 class Draft(BaseModel):
@@ -166,6 +184,15 @@ def update_email(email_id: str, update: CategoryUpdate) -> EmailMessage:
     return triage_new_email(message, source="user")
 
 
+@app.post("/api/emails/{email_id}/retriage")
+def retriage_email(email_id: str, body: Retriage) -> RetriageResult:
+    """Apply the person's feedback (keep or ignore the sender, a learned rule) and run triage on the email again."""
+    if not body.reason.strip():
+        raise HTTPException(422, "a reason is required")
+    message, changed = feedback_agent.retriage(_stored(email_id), body.reason.strip())
+    return RetriageResult(email=message, **changed)
+
+
 @app.post("/api/emails/{email_id}/read")
 def mark_read(email_id: str) -> EmailMessage:
     """Mark the email read in Gmail and drop its UNREAD label here."""
@@ -259,13 +286,47 @@ def get_ignore_list() -> list[IgnoreEntry]:
 @app.post("/api/ignore-list")
 def add_ignored_sender(body: IgnoreSender) -> list[IgnoreEntry]:
     """Add one sender under a reason; a sender already listed moves to that reason."""
-    return ignore_list.add(body.sender.strip(), body.ignore_reason_label)
+    entries = ignore_list.add(body.sender.strip(), body.ignore_reason_label, "user")
+    what = f"{body.sender.strip().lower()} -> {body.ignore_reason_label.value}"
+    trace_store.record_learning("ignore_list_added", what, "user", "Memory tab")
+    return entries
 
 
 @app.delete("/api/ignore-list/{sender}")
 def remove_ignored_sender(sender: str) -> list[IgnoreEntry]:
     """Take one sender off the list."""
-    return ignore_list.remove(sender)
+    was = ignore_list.label_for(sender.lower())
+    entries = ignore_list.remove(sender)
+    if was:
+        trace_store.record_learning("ignore_list_removed", f"{sender.lower()} (was {was.value})", "user", "Memory tab")
+    return entries
+
+
+class KeepEntry(BaseModel):
+    """Body for adding one address or domain to the pre-triage keep list."""
+
+    entry: str
+
+
+@app.get("/api/keep-list")
+def get_keep_list() -> list[str]:
+    """Senders and domains that always reach the triage model."""
+    return keep_list.load()
+
+
+@app.post("/api/keep-list")
+def add_kept(body: KeepEntry) -> list[str]:
+    """Add an address or a domain (for example 53.com) to the keep list."""
+    entries = keep_list.add(body.entry)
+    trace_store.record_learning("keep_list_added", body.entry.strip().lower(), "user", "Memory tab")
+    return entries
+
+
+@app.delete("/api/keep-list/{entry}")
+def remove_kept(entry: str) -> list[str]:
+    entries = keep_list.remove(entry)
+    trace_store.record_learning("keep_list_removed", entry.strip().lower(), "user", "Memory tab")
+    return entries
 
 
 @app.get("/api/traces")

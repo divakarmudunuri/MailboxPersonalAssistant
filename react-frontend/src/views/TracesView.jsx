@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 const PAGE_SIZE = 20;
 const REFRESH_MS = 30000;
-const STEPS = ["inbox_manager", "triage", "pre_triage", "manual_user_input", "inbox_report", "memory_chat"];
+const STEPS = ["inbox_manager", "memory", "triage", "pre_triage", "manual_user_input", "inbox_report", "memory_chat"];
 
 const fmtTime = (iso) => new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
 
@@ -56,7 +56,7 @@ export default function TracesView() {
         <input
           type="search"
           value={search}
-          placeholder="Search step, sender, subject, category, rule, or reason…"
+          placeholder="Search step, action, sender, subject, category, rule, or reason…"
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Search traces"
         />
@@ -71,16 +71,17 @@ export default function TracesView() {
       <div className="tablewrap">
         <table>
           <thead>
-            <tr><th>When</th><th>Step</th><th>From</th><th>Subject</th><th>Category</th><th>Rule</th><th>Reason</th><th>ms</th></tr>
+            <tr><th>When</th><th>Step</th><th>Action</th><th>From</th><th>Subject</th><th>Category</th><th>Rule</th><th>Reason</th><th>ms</th></tr>
           </thead>
           <tbody>
             {data.items.length === 0 && (
-              <tr><td colSpan={8} className="muted-cell">{query ? `No trace entries match “${query}”.` : step ? `No ${step} entries yet.` : "No traces yet. Entries appear as emails are processed."}</td></tr>
+              <tr><td colSpan={9} className="muted-cell">{query ? `No trace entries match “${query}”.` : step ? `No ${step} entries yet.` : "No traces yet. Entries appear as emails are processed."}</td></tr>
             )}
             {data.items.map((t, i) => (
               <tr key={`${t.email_id}-${t.step}-${t.at}-${i}`}>
                 <td className="nowrap">{fmtTime(t.at)}</td>
                 <td><span className={`chip chip-step-${t.step}`}>{t.step}</span></td>
+                <td className="mono">{t.action_taken || "—"}</td>
                 <td title={t.sender}>{t.sender ? sender(t.sender) : "—"}</td>
                 <td title={t.subject}>{t.subject || "(no subject)"}</td>
                 <td>{t.category ? <span className={`chip chip-${t.category}`}>{t.category}</span> : "—"}</td>

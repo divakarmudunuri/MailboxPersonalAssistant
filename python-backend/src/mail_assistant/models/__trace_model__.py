@@ -14,3 +14,4 @@ class TraceEntry:
     rule: str  # the rule applied by this step, or ""
     reason: str
     duration_ms: int
+    action_taken: str = ""  # what the step did, one id from the vocabulary in db/__trace_store__.py

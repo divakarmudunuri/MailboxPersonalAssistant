@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
-const REASONS = ["promotions", "newsletter", "social", "spam", "subscription", "marketing", "notification", "miscellaneous"];
+const REASONS = ["promotions", "newsletter", "social", "forums", "spam", "subscription", "marketing", "notification", "miscellaneous"];
+const ORIGIN = { model: "added by the triage model", user: "added by you", scan: "proposed from a scan of your mailbox headers", gmail: "added from a Gmail tab", unknown: "origin not recorded" };
 
 const WELCOME =
   "Tell me how you want your inbox handled, for example “ignore GitHub notifications” or “anything from my landlord needs my review”. I will update your learned preferences.";
@@ -15,6 +16,8 @@ export default function MemoryView() {
   const [ignore, setIgnore] = useState([]);
   const [newSender, setNewSender] = useState("");
   const [newReason, setNewReason] = useState("promotions");
+  const [keep, setKeep] = useState([]);
+  const [newKeep, setNewKeep] = useState("");
   const endRef = useRef(null);
 
   function loadIgnore() {
@@ -33,6 +36,23 @@ export default function MemoryView() {
     if (r.ok) { setIgnore(await r.json()); setNewSender(""); }
   }
 
+  function loadKeep() {
+    fetch("/api/keep-list").then((r) => (r.ok ? r.json() : [])).then(setKeep);
+  }
+
+  async function addKept(event) {
+    event.preventDefault();
+    const entry = newKeep.trim();
+    if (!entry) return;
+    const r = await fetch("/api/keep-list", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ entry }) });
+    if (r.ok) { setKeep(await r.json()); setNewKeep(""); }
+  }
+
+  async function removeKept(entry) {
+    const r = await fetch(`/api/keep-list/${encodeURIComponent(entry)}`, { method: "DELETE" });
+    if (r.ok) setKeep(await r.json());
+  }
+
   async function removeIgnored(sender) {
     const r = await fetch(`/api/ignore-list/${encodeURIComponent(sender)}`, { method: "DELETE" });
     if (r.ok) setIgnore(await r.json());
@@ -47,6 +67,7 @@ export default function MemoryView() {
 
   useEffect(load, []);
   useEffect(loadIgnore, []);
+  useEffect(loadKeep, []);
   useEffect(() => { endRef.current?.scrollIntoView({ block: "nearest" }); }, [messages]);
 
   async function send(event) {
@@ -124,6 +145,28 @@ export default function MemoryView() {
       <section className="detail ignore-panel">
         <div className="brief-head">
           <div>
+            <h3 className="prose-heading">Always triage <span className="muted">{keep.length}</span></h3>
+            <p className="meta">Senders and domains that always reach the triage model, whatever the ignore list or any shortcut would decide. Add an address, or a domain such as 53.com.</p>
+          </div>
+          <form className="composer" onSubmit={addKept}>
+            <input value={newKeep} placeholder="sender@example.com or example.com" onChange={(e) => setNewKeep(e.target.value)} aria-label="Sender or domain to keep" />
+            <button type="submit" disabled={!newKeep.trim()}>Keep</button>
+          </form>
+        </div>
+        {keep.length === 0 && <p className="empty">Nothing kept yet.</p>}
+        <div className="cloud">
+          {keep.map((k) => (
+            <span key={k} className="tag keep">
+              {k}
+              <button type="button" className="ghost small" onClick={() => removeKept(k)} title={`Stop keeping ${k}`} aria-label={`Remove ${k}`}>×</button>
+            </span>
+          ))}
+        </div>
+      </section>
+
+      <section className="detail ignore-panel">
+        <div className="brief-head">
+          <div>
             <h3 className="prose-heading">Pre-triage ignore list <span className="muted">{total}</span></h3>
             <p className="meta">Mail from these senders is marked ignore before any model call. Ignored senders are filed here instead of in memory, by reason. Type a sender to find it, or add it with a reason.</p>
           </div>
@@ -142,7 +185,7 @@ export default function MemoryView() {
               <h4><span className="chip chip-ignore">{entry.ignore_reason_label}</span> <span className="muted">{entry.senders.length}</span></h4>
               <div className="cloud">
                 {entry.senders.map((s) => (
-                  <span key={s} className={`tag${needle && !s.includes(needle) ? " dim" : ""}`}>
+                  <span key={s} className={`tag origin-${entry.added_by?.[s] || "unknown"}${needle && !s.includes(needle) ? " dim" : ""}`} title={ORIGIN[entry.added_by?.[s] || "unknown"]}>
                     {s}
                     <button type="button" className="ghost small" onClick={() => removeIgnored(s)} title={`Remove ${s} from the list`} aria-label={`Remove ${s}`}>×</button>
                   </span>

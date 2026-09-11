@@ -248,6 +248,7 @@ td.reason-cell { min-width: 260px; color: var(--muted); }
 .chip-step-triage { color: var(--accent); border-color: var(--accent); }
 .chip-step-inbox_manager, .chip-step-inbox_report { color: var(--rust); border-color: var(--rust); }
 .chip-step-memory_chat { color: var(--amber); border-color: var(--amber); }
+.chip-step-memory { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 
 /* --- home briefing ------------------------------------------------------- */
 .brief-head h2 { margin: 0 0 4px; }
@@ -293,6 +294,11 @@ td.reason-cell { min-width: 260px; color: var(--muted); }
   transition: opacity 120ms;
 }
 .tag.dim { opacity: 0.25; }
+.tag.keep { border-color: var(--accent); color: var(--accent); }
+.tag.origin-model { border-left: 3px solid var(--rust); }
+.tag.origin-user { border-left: 3px solid var(--accent); }
+.tag.origin-gmail { border-left: 3px solid var(--amber); }
+.tag.origin-scan { border-left: 3px solid var(--muted); }
 .tag button { padding: 0 6px; font-size: 14px; line-height: 1.2; }
 button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
 button.ghost:hover { color: var(--rust); border-color: var(--rule); }

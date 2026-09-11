@@ -13,11 +13,12 @@ A walkthrough of the app: triage, the Quick Overview, the inbox manager acting o
 ## What it does
 
 - **Triage.** Each new email gets a category: `ignore`, `notify`, `auto_schedule`, `auto_draft`,
-  `user_reply_complete`, or `pending`. Mail Gmail already sorted into Promotions, Social, Forums, or Spam, and
-  threads you already replied to, are decided without a model call. Everything else goes to the model with your rules
+  `user_reply_complete`, or `pending`. Threads you already replied to, senders the app has learned to ignore, and
+  automated senders with no rule about them are decided without a model call; Gmail's own tab sorting is not trusted. Everything else goes to the model with your rules
   and the decision records which rule it applied.
 - **Long-term memory.** Base rules live in code; the rules you teach it through the Memory tab's chat live in a JSON
-  file and win over the base rules. Ignored senders go on a separate pre-triage ignore list you can edit.
+  file and win over the base rules. Ignored senders go on a separate pre-triage ignore list you can edit, and a keep
+  list names senders and domains that must always reach the model.
 - **Acting.** For `auto_schedule` mail the inbox manager can create a calendar reminder or answer a meeting invitation.
   For `auto_draft` it saves a draft reply on the thread for you to review. The agents never send mail: only
   the Reply button in the Inbox tab does, after the manager drafts the reply and you edit and confirm it.
@@ -94,6 +95,7 @@ watcher with `uv run python -m mail_assistant.mail_watcher.__new_mail_watcher__`
 | [docs/sequences.md](docs/sequences.md) | Sequence diagrams for a new email, the inbox manager, a manual save, teaching a preference, the Quick Overview, and startup |
 | [docs/state-graphs.md](docs/state-graphs.md) | The LangGraph state graphs, generated from the code |
 | [docs/data.md](docs/data.md) | Entities, persisted files, rule and action vocabularies, key settings |
+| [docs/run-stats-2026-09-11.md](docs/run-stats-2026-09-11.md) | Measured statistics of a full 30-day backfill run |
 | [python-backend/README.md](python-backend/README.md) | Setup, settings, API routes, logs, code style |
 
 ## Layout

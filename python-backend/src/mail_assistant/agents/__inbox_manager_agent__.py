@@ -202,6 +202,21 @@ def inbox_manager_agent():
     return _graph.compile()
 
 
+def _action_taken(action: str) -> str:
+    """The action id for the manager's recorded action text."""
+    text = action.lower()
+    if text.startswith("failed"):
+        return "failed"
+    if "respond_to_invite" in text:
+        answers = ("accepted", "declined", "tentative")
+        return next((f"{a}_invitation" for a in answers if a in text), "answered_invitation")
+    if "create_reminder" in text:
+        return "scheduled_meeting"
+    if "save_draft" in text:
+        return "created_draft"
+    return "no_action"
+
+
 def _outcome(messages: list) -> tuple[str, str]:
     """(what was done, tools used): the write tools' results if any, else the model's closing sentence."""
     used = [m.name for m in messages if isinstance(m, ToolMessage)]
@@ -234,7 +249,7 @@ def _run(message: EmailMessage, as_category: Category) -> list:
     log.info("Inbox manager for %s: %s", message.id, message.action)
     email_store.save(message)
     traced = replace(message, reason=message.action, applied_rule=tools_used or "none")
-    trace_store.record("inbox_manager", traced, int((time.monotonic() - started) * 1000))
+    trace_store.record("inbox_manager", traced, int((time.monotonic() - started) * 1000), _action_taken(message.action))
     return messages
 
 

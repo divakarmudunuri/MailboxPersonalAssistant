@@ -4,17 +4,21 @@ Every tool returns text (JSON for structured results). Message and thread ids ar
 """
 
 import json
+import threading
 from datetime import UTC, datetime
-from functools import cache
 
 from langchain_core.tools import tool
 
 from mail_assistant.gmail_client import GmailImapClient
 
+_local = threading.local()
 
-@cache
+
 def _mailbox() -> GmailImapClient:
-    return GmailImapClient()
+    """One mailbox client per thread: IMAP connections are not thread-safe."""
+    if not hasattr(_local, "mailbox"):
+        _local.mailbox = GmailImapClient()
+    return _local.mailbox
 
 
 def _dump(value) -> str:

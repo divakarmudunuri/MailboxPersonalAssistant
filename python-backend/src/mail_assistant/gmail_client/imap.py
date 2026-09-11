@@ -240,8 +240,11 @@ class GmailImapClient:
         return _text_body(email.message_from_bytes(self._imap.fetch([uids[0]], [b"RFC822"])[uids[0]][b"RFC822"]))
 
     @reconnecting
-    def has_been_replied_to(self, message: EmailMessage) -> bool:
-        """True if a message in the Sent folder shares the thread and is newer than this one."""
+    def has_been_replied_to(self, message: EmailMessage, sent: dict[str, datetime] | None = None) -> bool:
+        """True if a message in the Sent folder shares the thread and is newer than this one. With `sent` (thread id
+        -> latest send time, from `sent_threads`) the answer comes from that map with no search."""
+        if sent is not None:
+            return message.thread_id in sent and sent[message.thread_id] > message.received_at
         uids = self._uids_for_thread(message.thread_id, self._special(SENT))
         if not uids:
             return False
@@ -258,6 +261,15 @@ class GmailImapClient:
         """Whether one message matches a Gmail search query, such as `category:promotions` or `is:muted`."""
         self._select(self._special(ALL))
         return bool(self._imap.search(["X-GM-MSGID", _int(message_id), "X-GM-RAW", query]))
+
+    @reconnecting
+    def first_match(self, message_id: str, queries: dict[str, str]) -> str | None:
+        """The key of the first Gmail query the message matches, or None: one search for the whole set, and the
+        single queries only when that hit, so the usual miss costs one round trip."""
+        combined = " OR ".join(queries.values())  # Gmail rejects a lone parenthesised term, so no parentheses
+        if not self.matches(message_id, combined):
+            return None
+        return next((key for key, q in queries.items() if self.matches(message_id, q)), None)
 
     @reconnecting
     def list_folders(self) -> list[str]:

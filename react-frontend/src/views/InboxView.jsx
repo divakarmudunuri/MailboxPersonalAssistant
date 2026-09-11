@@ -23,8 +23,8 @@ export default function InboxView({ open = null }) {
   const [page, setPage] = useState(1);
   const [data, setData] = useState({ items: [], total: 0 });
   const [selected, setSelected] = useState(null);
-  const [form, setForm] = useState({ category: "", reason: "" });
-  const [saved, setSaved] = useState(false);
+  const [retriage, setRetriage] = useState(null); // {reason} while the feedback box is open
+  const [retriaged, setRetriaged] = useState(null); // what the last Triage again changed
   const [error, setError] = useState("");
   const [reply, setReply] = useState(null); // the draft being edited: {to, subject, body, draft_message_id}
   const [busy, setBusy] = useState(""); // "drafting" | "sending" | ""
@@ -73,8 +73,8 @@ export default function InboxView({ open = null }) {
 
   function select(email) {
     setSelected(email);
-    setForm({ category: email.category, reason: email.reason });
-    setSaved(false);
+    setRetriage(null);
+    setRetriaged(null);
     setReply(null);
     setSent(false);
     setIgnoring(false);
@@ -169,13 +169,23 @@ export default function InboxView({ open = null }) {
     if (!r.ok) { setError(`Save failed: API returned ${r.status}`); return false; }
     const updated = await r.json();
     replaceSelected(updated);
-    setForm({ category: updated.category, reason: updated.reason });
     refreshAfter(updated, reply !== null);
     return true;
   }
 
-  async function save() {
-    if (await decide(form)) setSaved(true);
+  // Triage again: the feedback becomes standing preferences (keep list, ignore list, a learned rule), then the
+  // triage graph runs on this email once more.
+  async function triageAgain() {
+    setBusy("retriaging");
+    try {
+      const r = await post("retriage", { reason: retriage.reason.trim() });
+      replaceSelected(r.email);
+      setRetriaged(r);
+      setRetriage(null);
+      setError("");
+      refreshAfter(r.email, false);
+    } catch (e) { setError(`Triage again failed: ${e.message}`); }
+    setBusy("");
   }
 
   async function ignore() {
@@ -254,6 +264,9 @@ export default function InboxView({ open = null }) {
                 <button onClick={() => { setIgnoring(true); setIgnoreReason(""); }} disabled={selected.category === "ignore" || ignoring}>
                   {selected.category === "ignore" ? "Ignored" : "Ignore"}
                 </button>
+                <button onClick={() => { setRetriage({ reason: "" }); setRetriaged(null); }} disabled={busy !== "" || retriage !== null}>
+                  {busy === "retriaging" ? "Triaging…" : "Triage again"}
+                </button>
                 {sent && <p className="hint">Sent. The email is now marked as replied.</p>}
               </div>
               )}
@@ -310,23 +323,32 @@ export default function InboxView({ open = null }) {
               <h3>Email</h3>
               <pre className="body">{selected.body_text || selected.snippet}</pre>
 
-              <h3>Change decision</h3>
-              <div className="fields">
-                <label>
-                  <span>Category</span>
-                  <select value={form.category} onChange={(e) => { setForm({ ...form, category: e.target.value }); setSaved(false); }}>
-                    {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Reason</span>
-                  <textarea rows={3} value={form.reason} onChange={(e) => { setForm({ ...form, reason: e.target.value }); setSaved(false); }} />
-                </label>
-              </div>
-              <div className="buttons">
-                <button className="primary" onClick={save}>Save</button>
-                {saved && <p className="hint">Saved. This is now the remembered preference for the sender.</p>}
-              </div>
+              {retriage && (
+                <>
+                  <h3>Triage again</h3>
+                  <div className="fields">
+                    <label>
+                      <span>What should the assistant do differently?</span>
+                      <textarea rows={3} value={retriage.reason} autoFocus placeholder="e.g. never ignore mail from this sender; or: this is a newsletter, ignore it; or: invitations from her should be accepted"
+                        onChange={(e) => setRetriage({ reason: e.target.value })} />
+                    </label>
+                  </div>
+                  <div className="buttons">
+                    <button className="primary" onClick={triageAgain} disabled={busy !== "" || !retriage.reason.trim()}>Triage again</button>
+                    <button onClick={() => setRetriage(null)} disabled={busy !== ""}>Cancel</button>
+                    <p className="hint">Your reason is turned into standing preferences: the sender can be kept or ignored, and a learned rule may be added. Then this email is triaged once more.</p>
+                  </div>
+                </>
+              )}
+              {retriaged && (
+                <p className="hint">
+                  {retriaged.reply}
+                  {retriaged.kept ? " Sender added to the keep list." : ""}
+                  {retriaged.ignored ? ` Sender added to the ignore list as ${retriaged.ignored}.` : ""}
+                  {retriaged.rule_added ? ` Learned rule "${retriaged.rule_added}" added.` : ""}
+                  {" "}New decision: {retriaged.email.category}{retriaged.email.applied_rule ? ` (${retriaged.email.applied_rule})` : ""}.
+                </p>
+              )}
             </>
           )}
         </section>

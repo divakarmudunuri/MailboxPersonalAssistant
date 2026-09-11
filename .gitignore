@@ -27,3 +27,6 @@ CLAUDE.md
 
 # Local scratch that must never be committed
 do_not_checkin/
+
+# Run statistics kept locally only
+docs/run-stats-2026-09-11-learning-do-not-commit.md

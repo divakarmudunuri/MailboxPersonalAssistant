@@ -103,8 +103,9 @@ delete it to start over); `logs/` holds the log. The server port is 8000.
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | | Needed only by agents on that provider |
 | `LANGSMITH_TRACING` | `false` | `true` sends every graph run, model call, and tool call to LangSmith; needs `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT` names the project |
 | `MAIL_BACKFILL_DAYS` | `0` | On a fresh start with no cursor, store inbox mail from this many days ago before waiting for new mail |
-| `PRE_TRIAGE_IGNORE_LABELS` | | Comma-separated Gmail labels whose mail pre-triage marks `ignore` without a model call; matched case-insensitively, and system labels may be written as Gmail names them (`SENT`, `DRAFT`, `CHAT`, `SPAM`, `TRASH`). Gmail's Promotions, Social, Forums, Spam, and muted mail are always treated that way (rules `gmail_promotions`, `gmail_social`, `gmail_forums`, `gmail_spam`, `gmail_muted`) |
+| `PRE_TRIAGE_IGNORE_LABELS` | | Comma-separated Gmail labels whose mail pre-triage marks `ignore` without a model call; matched case-insensitively, and system labels may be written as Gmail names them (`SENT`, `DRAFT`, `CHAT`, `SPAM`, `TRASH`). Muted threads are always treated that way (rule `gmail_muted`); Gmail's Promotions, Social, and Forums tabs are not used as decisions |
 | `TRIAGE_INTERVAL_SECONDS` | `30` | Seconds between passes that send newly stored mail to the triage agent |
+| `TRIAGE_WORKERS` | `5` | Emails triaged at the same time within a pass; threads start only when there is work. Each worker holds its own IMAP connection, and Gmail allows 15 per account |
 | `REPORT_INTERVAL_SECONDS` | `10800` | Seconds between automatic Quick Overview builds; the first is at startup, and a build is skipped when nothing changed |
 | `LOG_LEVEL` | `INFO` | Set to `DEBUG` to log full message contents |
 
@@ -115,6 +116,7 @@ delete it to start over); `logs/` holds the log. The server port is 8000.
 | GET | `/api/emails?category=&page=1&page_size=20` | Paginated list, newest first, optional category filter |
 | GET | `/api/emails/{id}` | One email |
 | POST | `/api/emails/{id}/read` | Mark the email read in Gmail and drop its `UNREAD` label |
+| POST | `/api/emails/{id}/retriage` | Body `{"reason": "..."}`, the person's feedback in prose; the feedback agent keeps or ignores the sender and may add a learned rule, then triage runs again; returns the email plus `reply`, `kept`, `ignored`, `rule_added` |
 | GET | `/api/emails/{id}/draft` | The draft already in Gmail's Drafts on the email's thread, by the manager or by hand; 404 when there is none |
 | POST | `/api/emails/{id}/draft` | The inbox manager drafts a reply now (saved in Gmail's Drafts); returns `{to, subject, body, draft_message_id}` |
 | POST | `/api/emails/{id}/send` | Body: the edited draft; sends it as a reply on the thread over SMTP, discards any Gmail draft on the thread, and files the email as `user_reply_complete` (rule `manual`) |
@@ -122,11 +124,12 @@ delete it to start over); `logs/` holds the log. The server port is 8000.
 | GET | `/api/memory` | Long-term memory: named base rules (from code) and learned rules (`- name: rule` lines) |
 | GET | `/api/ignore-list` | The pre-triage ignore list: senders grouped by reason (`promotions`, `newsletter`, `social`, `spam`, `subscription`, `marketing`, `notification`, `miscellaneous`) |
 | POST / DELETE | `/api/ignore-list`, `/api/ignore-list/{sender}` | Add or move one sender (`{"sender": ..., "ignore_reason_label": ...}`), or remove one |
+| GET / POST / DELETE | `/api/keep-list`, `/api/keep-list/{entry}` | The keep list of addresses and domains that always reach the triage model; add `{"entry": "53.com"}` or remove one |
 | POST | `/api/memory/chat` | Body `{"message": "..."}`; the model returns named additions and removals, code merges them into the learned rules (removals only when the message asks), and the reply plus the new rules come back |
 | GET | `/api/home` | Counts and newest items for the Home tab: emails the inbox manager acted on, with the action (the UI shows this one), plus triage items waiting on you (`notify`, `auto_draft`, `pending`), which the UI no longer shows |
 | GET | `/api/report` | The last Quick Overview (`briefing` is null until one is built) |
 | POST | `/api/report/refresh` | Build a fresh Quick Overview: code gathers the last 30 days of stored mail, the Sent folder, and the calendar into one snapshot, and one model call writes the sections |
-| GET | `/api/traces?step=&q=&page=1&page_size=20` | Trace log, newest first, optionally limited to one step (`manual_user_input`, `pre_triage`, `triage`, `inbox_manager`, `inbox_report`, `memory_chat`), with category, rule, reason, and duration |
+| GET | `/api/traces?step=&q=&page=1&page_size=20` | Trace log, newest first, optionally limited to one step (`manual_user_input`, `pre_triage`, `triage`, `inbox_manager`, `inbox_report`, `memory_chat`), with category, rule, reason, duration, and `action_taken` (what the step did, e.g. `created_draft`, `categorized_auto_draft`) |
 | GET | `/api/graph` | Every agent graph (triage router, inbox manager, inbox report) with node descriptions and edges, used by the UI's Graph tab |
 
 Categories: `ignore`, `notify`, `auto_schedule`, `user_reply_complete`, `auto_draft`, `pending`. For `auto_schedule` the inbox manager may create a calendar reminder or answer a meeting invitation; for `auto_draft` it saves a draft reply on the thread; what it did is stored in the email's `action` and traced. Base rules decide only `ignore` and `notify`; the assistant acts (`auto_schedule`, `auto_draft`) only for emails covered by a learned rule added through the Memory chat, for example a sender or a kind of email such as meeting requests. Each email also carries `applied_rule`: the base or learned rule the model applied, `pre_triage` when it was skipped as already replied, `gmail_*`, `label_*`, or `ignore_list_*` when pre-triage ignored it, or `manual` after a correction in the UI. Interactive docs at http://localhost:8000/docs.
